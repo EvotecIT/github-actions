@@ -1,0 +1,95 @@
+# .NET Testing Workflow
+name: Test .NET Libraries
+
+on:
+  pull_request:
+    # Run for any PR, including stacked PRs (PR → non-main branch)
+    branches: ['**']
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    # Only run on direct pushes to integration branches (no PR duplication)
+    branches:
+      - master
+      - 'release/**'
+  workflow_dispatch:
+
+concurrency:
+  # One run per head SHA; cancels older duplicates when you push new commits
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: '8.x'
+  BUILD_CONFIGURATION: 'Debug'
+  TEST_VERBOSITY: minimal
+  SUMMARIZE_FAILURES: true
+
+jobs:
+  test-windows:
+    name: 'Windows'
+    # Optional: skip draft PRs to save cycles
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: [self-hosted, windows]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore ADPlayground.sln
+
+      - name: Build solution
+        run: dotnet build ADPlayground.sln --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+      - name: Run tests
+        run: >
+          dotnet test ADPlayground.sln
+          --configuration ${{ env.BUILD_CONFIGURATION }}
+          --no-build
+          --verbosity ${{ env.TEST_VERBOSITY }}
+          --logger "console;verbosity=${{ env.TEST_VERBOSITY }}"
+          --logger trx
+          --collect:"XPlat Code Coverage"
+        timeout-minutes: 30
+
+      - name: Summarize failing tests
+        if: failure() && env.SUMMARIZE_FAILURES == 'true'
+        shell: pwsh
+        run: |
+          $trxFiles = Get-ChildItem -Recurse -Filter *.trx
+          if ($trxFiles.Count -eq 0) { Write-Host "No TRX files found for failure analysis"; exit 0 }
+          Write-Host "=== Failed Tests Summary ==="
+          $failureCount = 0
+          $trxFiles | ForEach-Object {
+            try {
+              Select-Xml -Path $_.FullName -XPath "//UnitTestResult[@outcome='Failed']" |
+                ForEach-Object {
+                  $name = $_.Node.testName
+                  $msg = $_.Node.Output.ErrorInfo.Message ?? "No error message available"
+                  Write-Host "❌ $name"
+                  Write-Host "   $msg"
+                  $failureCount++
+                }
+            } catch {
+              Write-Host "Warning: Could not parse TRX file $($_.Name): $($_.Exception.Message)"
+            }
+          }
+          if ($failureCount -eq 0) { Write-Host "No failed tests found in TRX files" } else { Write-Host "=== Total failed tests: $failureCount ===" }
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-windows
+          path: '**/*.trx'
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports-windows
+          path: '**/coverage.cobertura.xml'

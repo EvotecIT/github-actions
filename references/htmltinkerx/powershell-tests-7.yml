@@ -1,0 +1,181 @@
+name: Test PowerShell (7)
+
+# This workflow is disabled but ready for use
+# To enable: change 'workflow_dispatch' to include 'push' and 'pull_request' triggers
+# on:
+#   workflow_dispatch:  # Manual trigger only
+on:
+  push:
+    paths-ignore:
+      - '*.md'
+      - 'Docs/**'
+      - 'Examples/**'
+      - '.gitignore'
+  pull_request:
+    branches:
+      - v2-speedygonzales
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_VERSION: '8.x'
+  BUILD_CONFIGURATION: 'Debug'
+
+jobs:
+  refresh-psd1:
+    name: 'Refresh PSD1'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+
+      - name: Setup PowerShell modules
+        shell: pwsh
+        run: |
+          Install-Module PSPublishModule -Force -Scope CurrentUser -AllowClobber
+
+      - name: Refresh module manifest
+        shell: pwsh
+        env:
+          RefreshPSD1Only: 'true'
+        run: |
+          .\Build\Build-Module.ps1
+
+      - name: Commit refreshed PSD1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add PSParseHTML.psd1
+          git commit -m "chore: regenerate psd1" || echo "No changes to commit"
+          git push origin HEAD:$Env:HEAD_BRANCH
+
+      - name: Upload refreshed manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: psd1
+          path: PSParseHTML.psd1
+
+  test-windows-ps7:
+    needs: refresh-psd1
+    name: 'Windows PowerShell 7'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: psd1
+          path: .
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install PowerShell modules
+        shell: pwsh
+        run: |
+          Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)"
+          Install-Module -Name Pester -Repository PSGallery -Force -SkipPublisherCheck -AllowClobber
+          Install-Module -Name PSWriteColor -Repository PSGallery -Force -SkipPublisherCheck -AllowClobber
+
+      - name: Build .NET solution
+        run: |
+          dotnet restore Sources/HtmlTinkerX.sln
+          dotnet build Sources/HtmlTinkerX.sln --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+      - name: Run PowerShell tests
+        shell: pwsh
+        run: .\PSParseHTML.Tests.ps1
+        timeout-minutes: 10
+
+  test-ubuntu:
+    needs: refresh-psd1
+    name: 'Ubuntu PowerShell 7'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: psd1
+          path: .
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install PowerShell
+        run: |
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/microsoft.list
+          sudo apt-get update
+          sudo apt-get install -y powershell
+
+      - name: Install PowerShell modules
+        shell: pwsh
+        run: |
+          Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)"
+          Install-Module -Name Pester -Repository PSGallery -Force -SkipPublisherCheck -AllowClobber
+          Install-Module -Name PSWriteColor -Repository PSGallery -Force -SkipPublisherCheck -AllowClobber
+
+      - name: Build .NET solution
+        run: |
+          dotnet restore Sources/HtmlTinkerX.sln
+          dotnet build Sources/HtmlTinkerX.sln --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+      - name: Run PowerShell tests
+        shell: pwsh
+        run: ./PSParseHTML.Tests.ps1
+        timeout-minutes: 10
+
+  test-macos:
+    needs: refresh-psd1
+    name: 'macOS PowerShell 7'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: psd1
+          path: .
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install PowerShell
+        run: brew install --cask powershell
+
+      - name: Install PowerShell modules
+        shell: pwsh
+        run: |
+          Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)"
+          Install-Module -Name Pester -Repository PSGallery -Force -SkipPublisherCheck -AllowClobber
+          Install-Module -Name PSWriteColor -Repository PSGallery -Force -SkipPublisherCheck -AllowClobber
+
+      - name: Build .NET solution
+        run: |
+          dotnet restore Sources/HtmlTinkerX.sln
+          dotnet build Sources/HtmlTinkerX.sln --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+      - name: Run PowerShell tests
+        shell: pwsh
+        run: ./PSParseHTML.Tests.ps1
+        timeout-minutes: 10

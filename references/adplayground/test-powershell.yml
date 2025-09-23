@@ -1,0 +1,247 @@
+name: Test PowerShell Module (Windows)
+
+on:
+  pull_request:
+    branches: ['**']
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches:
+      - master
+      - 'release/**'
+    paths-ignore:
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'Docs/**'
+  workflow_dispatch:
+
+# Avoid duplicate/obsolete runs on rapid pushes
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_VERSION: '8.x'
+  BUILD_CONFIGURATION: 'Debug'
+  TEST_VERBOSITY: 'None'   # 'Detailed' to restore full test output
+  SUMMARIZE_FAILURES: true # 'false' to disable summarizing failing tests
+
+jobs:
+  refresh-psd1:
+    name: 'Refresh PSD1'
+    runs-on: [self-hosted, windows]
+    # Optional: skip for draft PRs
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # For PRs: check out the PR HEAD; otherwise normal ref
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+
+      - name: Setup PowerShell modules
+        shell: pwsh
+        run: |
+          Install-Module PSPublishModule -Force -Scope CurrentUser -AllowClobber
+
+      - name: Refresh module manifest
+        env:
+          RefreshPSD1Only: 'true'
+        shell: pwsh
+        run: ./Module/Build/Build-Module.ps1
+
+      # Only push regenerated PSD1 when:
+      #  - event is a regular push (safe), OR
+      #  - PR is from the same repository (safe). Fork PRs remain read-only.
+      - name: Commit refreshed PSD1
+        if: >
+          github.event_name == 'push' ||
+          (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name == github.repository)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_BRANCH: ${{ github.event_name == 'pull_request'
+                           && github.event.pull_request.head.ref
+                           || github.ref_name }}
+        shell: pwsh
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Module/ADPlayground.psd1
+          git commit -m "chore: regenerate psd1 [skip ci]" || echo "No changes to commit"
+          git push origin HEAD:$Env:HEAD_BRANCH
+
+      - name: Upload refreshed manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: psd1
+          path: Module/ADPlayground.psd1
+
+  test-windows-ps5:
+    name: 'Windows PowerShell 5.1'
+    needs: refresh-psd1
+    runs-on: [self-hosted, windows]
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+
+      - name: Download manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: psd1
+          path: Module
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install PowerShell modules
+        shell: powershell
+        run: |
+          Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)"
+          Install-Module -Name Pester -Repository PSGallery -Force -SkipPublisherCheck -AllowClobber
+          Install-Module -Name PSWriteColor -Repository PSGallery -Force -SkipPublisherCheck -AllowClobber
+
+      - name: Build .NET solution
+        run: |
+          dotnet restore ADPlayground.sln
+          dotnet build ADPlayground.sln --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+      - name: Run PowerShell tests
+        shell: powershell
+        run: ./Module/ADPlayground.Tests.ps1
+        timeout-minutes: 30
+
+      - name: Summarize failing tests
+        if: failure() && env.SUMMARIZE_FAILURES == 'true'
+        shell: powershell
+        run: |
+          $ResultFile = Join-Path -Path 'Module' -ChildPath 'TestResults.xml'
+          if (-not (Test-Path -Path $ResultFile)) {
+              Write-Host 'No test results file found for failure analysis'
+              exit 0
+          }
+          [xml]$Results = Get-Content -Path $ResultFile
+          $Cases = $Results.SelectNodes('//test-case')
+          $FailureCount = 0
+          $SummaryPath = $env:GITHUB_STEP_SUMMARY
+          Write-Host '=== Failed Tests Summary ==='
+          if ($SummaryPath) { '### Failed Tests Summary' | Out-File -FilePath $SummaryPath -Encoding utf8 -Append }
+          foreach ($Case in $Cases) {
+            if ($Case.result -in @('Failure','Error')) {
+              $Name = $Case.name
+              $Message = $Case.failure.message.'#text'
+              Write-Host "❌ $Name"
+              if ($Message) { Write-Host "   $Message" }
+              if ($SummaryPath) {
+                "- ❌ $Name" | Out-File -FilePath $SummaryPath -Encoding utf8 -Append
+                if ($Message) { "  - $Message" | Out-File -FilePath $SummaryPath -Encoding utf8 -Append }
+              }
+              $FailureCount++
+            }
+          }
+          if ($FailureCount -eq 0) {
+            Write-Host 'No failed tests found in result file'
+            if ($SummaryPath) { '- No failed tests found in result file' | Out-File -FilePath $SummaryPath -Encoding utf8 -Append }
+          } else {
+            Write-Host "=== Total failed tests: $FailureCount ==="
+            if ($SummaryPath) { "`nTotal failed tests: $FailureCount" | Out-File -FilePath $SummaryPath -Encoding utf8 -Append }
+          }
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-windows-ps5
+          path: Module/TestResults.xml
+
+  test-windows-ps7:
+    name: 'Windows PowerShell 7'
+    needs: refresh-psd1
+    runs-on: [self-hosted, windows]
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+
+      - name: Download manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: psd1
+          path: Module
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install PowerShell modules
+        shell: pwsh
+        run: |
+          Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)"
+          Install-Module -Name Pester -Repository PSGallery -Force -SkipPublisherCheck -AllowClobber
+          Install-Module -Name PSWriteColor -Repository PSGallery -Force -SkipPublisherCheck -AllowClobber
+
+      - name: Build .NET solution
+        run: |
+          dotnet restore ADPlayground.sln
+          dotnet build ADPlayground.sln --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+      - name: Run PowerShell tests
+        shell: pwsh
+        run: ./Module/ADPlayground.Tests.ps1
+        timeout-minutes: 30
+
+      - name: Summarize failing tests
+        if: failure() && env.SUMMARIZE_FAILURES == 'true'
+        shell: pwsh
+        run: |
+          $ResultFile = Join-Path -Path 'Module' -ChildPath 'TestResults.xml'
+          if (-not (Test-Path -Path $ResultFile)) {
+              Write-Host 'No test results file found for failure analysis'
+              exit 0
+          }
+          [xml]$Results = Get-Content -Path $ResultFile
+          $Cases = $Results.SelectNodes('//test-case')
+          $FailureCount = 0
+          $SummaryPath = $env:GITHUB_STEP_SUMMARY
+          Write-Host '=== Failed Tests Summary ==='
+          if ($SummaryPath) { '### Failed Tests Summary' | Out-File -FilePath $SummaryPath -Encoding utf8 -Append }
+          foreach ($Case in $Cases) {
+            if ($Case.result -in @('Failure','Error')) {
+              $Name = $Case.name
+              $Message = $Case.failure.message.'#text'
+              Write-Host "❌ $Name"
+              if ($Message) { Write-Host "   $Message" }
+              if ($SummaryPath) {
+                "- ❌ $Name" | Out-File -FilePath $SummaryPath -Encoding utf8 -Append
+                if ($Message) { "  - $Message" | Out-File -FilePath $SummaryPath -Encoding utf8 -Append }
+              }
+              $FailureCount++
+            }
+          }
+          if ($FailureCount -eq 0) {
+            Write-Host 'No failed tests found in result file'
+            if ($SummaryPath) { '- No failed tests found in result file' | Out-File -FilePath $SummaryPath -Encoding utf8 -Append }
+          } else {
+            Write-Host "=== Total failed tests: $FailureCount ==="
+            if ($SummaryPath) { "`nTotal failed tests: $FailureCount" | Out-File -FilePath $SummaryPath -Encoding utf8 -Append }
+          }
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-windows-ps7
+          path: Module/TestResults.xml
