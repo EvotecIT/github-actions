@@ -1,0 +1,493 @@
+name: Evotec Unified CI
+
+on:
+  workflow_call:
+    inputs:
+      # High-level toggles
+      run_tests:
+        description: 'Run .NET tests'
+        required: false
+        default: true
+        type: boolean
+      run_pester:
+        description: 'Run PowerShell/Pester tests'
+        required: false
+        default: false
+        type: boolean
+      rebuild_psd1:
+        description: 'Refresh module .psd1 before tests (PSPublishModule)'
+        required: false
+        default: false
+        type: boolean
+      collect_coverage:
+        description: 'Collect test coverage (XPlat Code Coverage / Pester NUnit XML)'
+        required: false
+        default: true
+        type: boolean
+      summarize_failures:
+        description: 'On failure, print only failing tests summary'
+        required: false
+        default: true
+        type: boolean
+      upload_artifacts:
+        description: 'Upload TRX/XML/coverage artifacts'
+        required: false
+        default: true
+        type: boolean
+
+      # Runners and matrices
+      runs_on:
+        description: 'JSON array of runner labels for all jobs'
+        required: false
+        default: '["windows-latest"]'
+        type: string
+      dotnet_versions:
+        description: 'JSON array of .NET SDK versions'
+        required: false
+        default: '["8.0.x"]'
+        type: string
+      frameworks:
+        description: 'JSON array of test frameworks (TFMs) to run; empty = all'
+        required: false
+        default: '[]'
+        type: string
+      build_configuration:
+        description: 'Build configuration for .NET (Debug/Release)'
+        required: false
+        default: 'Debug'
+        type: string
+      ps_versions:
+        description: 'JSON array of PowerShell versions ("5.1", "7")'
+        required: false
+        default: '["5.1","7"]'
+        type: string
+
+      # Paths and scripts
+      solution:
+        description: 'Path or glob to .sln (auto-detect if empty or not found)'
+        required: false
+        default: '**/*.sln'
+        type: string
+      module_manifest:
+        description: 'Path to module .psd1 (required when rebuild_psd1 or run_pester is true)'
+        required: false
+        default: ''
+        type: string
+      build_script:
+        description: 'Path to Build-Module.ps1'
+        required: false
+        default: 'Module/Build/Build-Module.ps1'
+        type: string
+      test_script:
+        description: 'Optional PS test script; if empty, Invoke-Pester on Tests folder'
+        required: false
+        default: ''
+        type: string
+
+      # Codecov
+      enable_codecov:
+        description: 'Upload coverage to Codecov (dotnet)'
+        required: false
+        default: false
+        type: boolean
+      codecov_token:
+        description: 'Codecov token (or use secrets.CODECOV_TOKEN)'
+        required: false
+        default: ''
+        type: string
+
+      # Claude review
+      claude_review:
+        description: 'Run Claude PR code review (only runs on pull_request)'
+        required: false
+        default: false
+        type: boolean
+      claude_model:
+        description: 'Claude model id (optional)'
+        required: false
+        default: ''
+        type: string
+      claude_use_sticky_comment:
+        description: 'Use sticky comment so Claude reuses the same thread'
+        required: false
+        default: true
+        type: boolean
+      claude_prompt:
+        description: 'Custom prompt for Claude review'
+        required: false
+        default: |
+          Please review this pull request and provide feedback on:
+          - Code quality and best practices
+          - Potential bugs or issues
+          - Performance considerations
+          - Security concerns
+          - Test coverage
+          Be constructive and helpful in your feedback.
+        type: string
+      # Issue posting (optional)
+      post_summary_issue:
+        description: 'On failure, post failing-tests summary as an Issue comment'
+        required: false
+        default: false
+        type: boolean
+      summary_issue_title:
+        description: 'Issue title to create/use for summaries'
+        required: false
+        default: 'CI Test Summary'
+        type: string
+      summary_issue_label:
+        description: 'Label to attach when creating the summary issue'
+        required: false
+        default: 'ci-summary'
+        type: string
+      post_summary_destination:
+        description: "Where to post summary comment: 'issue' or 'pr'"
+        required: false
+        default: 'issue'
+        type: string
+      sticky_summary_comment:
+        description: 'Reuse/update the same comment using a hidden marker'
+        required: false
+        default: true
+        type: boolean
+      summary_comment_tag:
+        description: 'Hidden marker tag inserted into the comment for updates'
+        required: false
+        default: 'evotec-ci-summary'
+        type: string
+
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # Optional PR code review job powered by Claude
+  claude:
+    if: ${{ inputs.claude_review && github.event_name == 'pull_request' }}
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+      - name: Claude Code Review
+        uses: anthropics/claude-code-action@beta
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          direct_prompt: ${{ inputs.claude_prompt }}
+          model: ${{ inputs.claude_model }}
+          use_sticky_comment: ${{ inputs.claude_use_sticky_comment }}
+
+  # Optional PSD1 refresh job (dependency for Pester tests)
+  refresh-psd1:
+    if: ${{ inputs.rebuild_psd1 }}
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Refresh PSD1
+        uses: ./.github/actions/ps-refresh-psd1
+        with:
+          build_script: ${{ inputs.build_script }}
+          manifest_path: ${{ inputs.module_manifest }}
+          commit_changes: false
+      - name: Upload PSD1
+        if: ${{ inputs.upload_artifacts }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: psd1
+          path: ${{ inputs.module_manifest }}
+
+  # .NET build/test
+  dotnet:
+    if: ${{ inputs.run_tests }}
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ${{ fromJSON(inputs.dotnet_versions) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve solution
+        id: sln
+        shell: pwsh
+        run: |
+          $pattern = '${{ inputs.solution }}'
+          if (Test-Path $pattern) {
+            $sln = Resolve-Path $pattern | Select-Object -First 1
+          } else {
+            $sln = Get-ChildItem -Recurse -Path . -Filter *.sln | Select-Object -Expand FullName -First 1
+          }
+          if (-not $sln) { throw "No solution .sln found (pattern: $pattern)" }
+          "sln=$sln" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Setup .NET ${{ matrix.sdk }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.sdk }}
+          cache: true
+
+      - name: Restore
+        run: dotnet restore "${{ steps.sln.outputs.sln }}"
+
+      - name: Build
+        run: dotnet build "${{ steps.sln.outputs.sln }}" --configuration "${{ inputs.build_configuration }}" --no-restore
+
+      - name: Test (discover and run per test project)
+        id: test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sln = '${{ steps.sln.outputs.sln }}'
+          $verbosity = 'minimal'
+          $frameworks = @(); try { $frameworks = [Text.Json.JsonSerializer]::Deserialize('${{ inputs.frameworks }}',[object]) } catch { }
+          $collect = ${{ inputs.collect_coverage && '"--collect:XPlat Code Coverage"' || '""' }}
+
+          # Discover test projects (*.Tests.csproj). Fallback to the solution if none.
+          $testProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -match '\.Tests\.csproj$' }
+          if (-not $testProjects -or $testProjects.Count -eq 0) {
+            Write-Host 'No *.Tests.csproj found. Running tests at solution level.'
+            $testProjects = @($null) # sentinel to run once at solution level
+          }
+
+          $overall = 0
+          foreach ($proj in $testProjects) {
+            $projName = if ($proj) { [IO.Path]::GetFileNameWithoutExtension($proj.Name) } else { [IO.Path]::GetFileNameWithoutExtension($sln) }
+            $resultsDir = Join-Path -Path 'artifacts/TestResults' -ChildPath $projName
+            New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
+
+            function Run-Test($fw) {
+              $fwArg = if ($fw) { "--framework $fw" } else { '' }
+              $logName = if ($fw) { "$projName-$fw.trx" } else { "$projName.trx" }
+              $target = if ($proj) { "`"$($proj.FullName)`"" } else { "`"$sln`"" }
+              $cmd = "dotnet test $target --configuration `"${{ inputs.build_configuration }}`" --no-build --verbosity $verbosity --logger `"console;verbosity=$verbosity`" --logger `"trx;LogFileName=$logName`" --results-directory `"$resultsDir`" $fwArg $collect"
+              Write-Host $cmd
+              Invoke-Expression $cmd
+              return $LASTEXITCODE
+            }
+
+            if ($frameworks.Count -gt 0) {
+              foreach ($fw in $frameworks) { $code = Run-Test $fw; if ($code -ne 0) { $overall = $code } }
+            } else {
+              $code = Run-Test $null; if ($code -ne 0) { $overall = $code }
+            }
+          }
+
+          exit $overall
+        timeout-minutes: 30
+
+      - name: Summarize failing tests
+        if: failure() && inputs.summarize_failures
+        id: dotnet-summary
+        uses: ./.github/actions/dotnet-test-summary
+
+      - name: Upload TRX
+        if: always() && inputs.upload_artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trx-${{ runner.os }}-${{ matrix.sdk }}
+          path: '**/*.trx'
+
+      - name: Upload coverage
+        if: always() && inputs.upload_artifacts && inputs.collect_coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ runner.os }}-${{ matrix.sdk }}
+          path: '**/coverage.cobertura.xml'
+
+      - name: Upload to Codecov
+        if: always() && inputs.enable_codecov && inputs.collect_coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: '**/coverage.cobertura.xml'
+          token: ${{ inputs.codecov_token || secrets.CODECOV_TOKEN }}
+
+      - name: Post summary comment (on failure)
+        if: failure() && inputs.post_summary_issue
+        uses: actions/github-script@v7
+        env:
+          SUMMARY_MARKER: ${{ inputs.summary_comment_tag }}-dotnet-${{ matrix.sdk }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const dest = `${{ toJSON(inputs.post_summary_destination) }}`.toLowerCase();
+            const sticky = Boolean(${{ inputs.sticky_summary_comment }});
+            const title = `${{ toJSON(inputs.summary_issue_title) }}`;
+            const label = `${{ toJSON(inputs.summary_issue_label) }}`;
+            const md = `${{ toJSON(steps.dotnet-summary.outputs.markdown || 'No summary available') }}`;
+            const marker = `<!-- ${process.env.SUMMARY_MARKER} -->`;
+            const body = `${marker}\n${md}`;
+
+            async function ensureIssue() {
+              const issues = await github.paginate(github.rest.issues.listForRepo, {owner, repo, state: 'open', per_page: 100});
+              let match = issues.find(i => i.title === title);
+              if (!match) {
+                const created = await github.rest.issues.create({ owner, repo, title, body: 'Creating summary thread.', labels: [label] });
+                match = created.data;
+              }
+              return match.number;
+            }
+
+            async function upsertComment(issue_number) {
+              const comments = await github.paginate(github.rest.issues.listComments, {owner, repo, issue_number, per_page: 100});
+              const found = comments.find(c => typeof c.body === 'string' && c.body.includes(marker));
+              if (sticky && found) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: found.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              }
+            }
+
+            if (dest === 'pr') {
+              if (context.eventName !== 'pull_request') { return; }
+              const issue_number = context.payload.pull_request.number;
+              await upsertComment(issue_number);
+            } else {
+              const issue_number = await ensureIssue();
+              await upsertComment(issue_number);
+            }
+
+  # PowerShell/Pester tests
+  pester:
+    if: ${{ inputs.run_pester }}
+    needs: ${{ inputs.rebuild_psd1 && 'refresh-psd1' || '' }}
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        psver: ${{ fromJSON(inputs.ps_versions) }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Download PSD1 (if refreshed)
+        if: ${{ inputs.rebuild_psd1 && inputs.upload_artifacts }}
+        uses: actions/download-artifact@v4
+        with:
+          name: psd1
+          path: ${{ inputs.module_manifest }}
+
+      - name: Install modules (PS 5.1)
+        if: ${{ matrix.psver == '5.1' }}
+        shell: powershell
+        run: |
+          Install-Module Pester -Force -SkipPublisherCheck -AllowClobber
+          Install-Module PSWriteColor -Force -SkipPublisherCheck -AllowClobber
+
+      - name: Install modules (PS 7)
+        if: ${{ matrix.psver != '5.1' }}
+        shell: pwsh
+        run: |
+          Install-Module Pester -Force -SkipPublisherCheck -AllowClobber
+          Install-Module PSWriteColor -Force -SkipPublisherCheck -AllowClobber
+
+      - name: Run tests (PS 5.1)
+        if: ${{ matrix.psver == '5.1' }}
+        shell: powershell
+        run: |
+          if ('${{ inputs.test_script }}') {
+            & '${{ inputs.test_script }}'
+          } else {
+            $cfg = New-PesterConfiguration
+            $cfg.Run.Path = 'Tests'
+            $cfg.Run.Exit = $true
+            $cfg.TestResult.Enabled = $true
+            $cfg.TestResult.OutputFormat = 'NUnitXml'
+            $cfg.TestResult.OutputPath = 'Module/TestResults.xml'
+            Invoke-Pester -Configuration $cfg
+          }
+
+      - name: Run tests (PS 7)
+        if: ${{ matrix.psver != '5.1' }}
+        shell: pwsh
+        run: |
+          if ('${{ inputs.test_script }}') {
+            & '${{ inputs.test_script }}'
+          } else {
+            $cfg = New-PesterConfiguration
+            $cfg.Run.Path = 'Tests'
+            $cfg.Run.Exit = $true
+            $cfg.TestResult.Enabled = $true
+            $cfg.TestResult.OutputFormat = 'NUnitXml'
+            $cfg.TestResult.OutputPath = 'Module/TestResults.xml'
+            Invoke-Pester -Configuration $cfg
+          }
+
+      - name: Summarize failing tests
+        if: failure() && inputs.summarize_failures
+        id: pester-summary
+        uses: ./.github/actions/pester-summary
+        with:
+          results_file: Module/TestResults.xml
+
+      - name: Post PS summary comment (on failure)
+        if: failure() && inputs.post_summary_issue
+        uses: actions/github-script@v7
+        env:
+          SUMMARY_MARKER: ${{ inputs.summary_comment_tag }}-pester-${{ matrix.psver }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const dest = `${{ toJSON(inputs.post_summary_destination) }}`.toLowerCase();
+            const sticky = Boolean(${{ inputs.sticky_summary_comment }});
+            const title = `${{ toJSON(inputs.summary_issue_title) }}`;
+            const label = `${{ toJSON(inputs.summary_issue_label) }}`;
+            const md = `${{ toJSON(steps.pester-summary.outputs.markdown || 'No summary available') }}`;
+            const marker = `<!-- ${process.env.SUMMARY_MARKER} -->`;
+            const body = `${marker}\n${md}`;
+
+            async function ensureIssue() {
+              const issues = await github.paginate(github.rest.issues.listForRepo, {owner, repo, state: 'open', per_page: 100});
+              let match = issues.find(i => i.title === title);
+              if (!match) {
+                const created = await github.rest.issues.create({ owner, repo, title, body: 'Creating summary thread.', labels: [label] });
+                match = created.data;
+              }
+              return match.number;
+            }
+
+            async function upsertComment(issue_number) {
+              const comments = await github.paginate(github.rest.issues.listComments, {owner, repo, issue_number, per_page: 100});
+              const found = comments.find(c => typeof c.body === 'string' && c.body.includes(marker));
+              if (sticky && found) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: found.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              }
+            }
+
+            if (dest === 'pr') {
+              if (context.eventName !== 'pull_request') { return; }
+              const issue_number = context.payload.pull_request.number;
+              await upsertComment(issue_number);
+            } else {
+              const issue_number = await ensureIssue();
+              await upsertComment(issue_number);
+            }
+
+      - name: Upload test results
+        if: always() && inputs.upload_artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-ps${{ matrix.psver }}
+          path: Module/TestResults.xml

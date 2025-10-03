@@ -1,0 +1,33 @@
+name: Unified CI (PR Summary Comments)
+
+on:
+  pull_request:
+    branches: ['**']
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - '**/*.md'
+      - 'Docs/**'
+      - '**/README.*'
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.gif'
+      - '**/*.svg'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE*'
+
+jobs:
+  ci:
+    uses: EvotecIT/github-actions/.github/workflows/unified-ci.yml@main
+    with:
+      runs_on: '["ubuntu-latest"]'
+      run_tests: true
+      run_pester: false
+      collect_coverage: true
+      summarize_failures: true
+      upload_artifacts: true
+      # Post failing-tests summary as a sticky PR comment
+      post_summary_issue: true
+      post_summary_destination: 'pr'
+      sticky_summary_comment: true
+      summary_comment_tag: 'evotec-ci-summary'
+    secrets: inherit

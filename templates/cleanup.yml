@@ -1,0 +1,29 @@
+name: Maintenance: Actions Storage Cleanup
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Delete items older than N days'
+        required: false
+        default: '7'
+      keep_artifacts:
+        description: 'Keep newest N artifacts'
+        required: false
+        default: '20'
+      keep_caches:
+        description: 'Keep newest N caches'
+        required: false
+        default: '20'
+
+jobs:
+  cleanup:
+    uses: evotecit/github-actions/.github/workflows/maintenance-cleanup.yml@main
+    with:
+      days: ${{ github.event.inputs.days || '7' }}
+      keep_artifacts: ${{ github.event.inputs.keep_artifacts || '20' }}
+      keep_caches: ${{ github.event.inputs.keep_caches || '20' }}
+      runs_on: '["ubuntu-latest"]'
+

@@ -1,0 +1,42 @@
+name: Unified CI (Self-hosted Windows)
+
+on:
+  pull_request:
+    branches: ['**']
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - '**/*.md'
+      - 'Docs/**'
+      - '**/README.*'
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.gif'
+      - '**/*.svg'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE*'
+  push:
+    branches: ['main','master','release/**']
+    paths-ignore:
+      - '**/*.md'
+      - 'Docs/**'
+      - '**/README.*'
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.gif'
+      - '**/*.svg'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE*'
+
+jobs:
+  ci:
+    uses: EvotecIT/github-actions/.github/workflows/unified-ci.yml@main
+    with:
+      runs_on: '["self-hosted","windows"]'   # add your extra labels if needed
+      run_tests: true
+      run_pester: true
+      collect_coverage: true
+      summarize_failures: true
+      upload_artifacts: true
+      # module_manifest: 'Module/MyModule.psd1'
+      # rebuild_psd1: true
+    secrets: inherit

@@ -1,0 +1,51 @@
+name: "Refresh PSD1 via PSPublishModule"
+description: "Installs PSPublishModule and runs your Build-Module.ps1 with RefreshPSD1Only=true; optionally commits changes."
+inputs:
+  build_script:
+    description: "Path to Build-Module.ps1"
+    required: false
+    default: "Module/Build/Build-Module.ps1"
+  manifest_path:
+    description: "Path to module manifest to git add/commit"
+    required: true
+  commit_changes:
+    description: "If true, commit and push regenerated PSD1"
+    required: false
+    default: "false"
+  git_branch:
+    description: "Branch to push to (defaults to current ref name)"
+    required: false
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    - name: Install PSPublishModule
+      shell: pwsh
+      run: |
+        Install-Module PSPublishModule -Force -Scope CurrentUser -AllowClobber
+
+    - name: Refresh module manifest
+      shell: pwsh
+      env:
+        RefreshPSD1Only: 'true'
+      run: |
+        $script = '${{ inputs.build_script }}'
+        if (-not (Test-Path -Path $script)) {
+          throw "Build script not found at $script"
+        }
+        & $script
+
+    - name: Commit refreshed PSD1
+      if: ${{ inputs.commit_changes == 'true' }}
+      shell: pwsh
+      env:
+        MANIFEST_PATH: ${{ inputs.manifest_path }}
+        HEAD_BRANCH: ${{ inputs.git_branch }}
+      run: |
+        $branch = if ([string]::IsNullOrEmpty($env:HEAD_BRANCH)) { '${{ github.ref_name }}' } else { $env:HEAD_BRANCH }
+        git config user.name  "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add -- $Env:MANIFEST_PATH
+        git commit -m "chore: regenerate psd1 [skip ci]" || echo "No changes to commit"
+        git push origin HEAD:$branch
+

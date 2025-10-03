@@ -1,0 +1,65 @@
+name: "Dotnet Failed Test Summary"
+description: "Parses TRX files and prints only failing tests to the job log and step summary; also returns Markdown output."
+inputs:
+  search_glob:
+    description: "Glob to search for TRX files"
+    required: false
+    default: "**/*.trx"
+outputs:
+  markdown:
+    description: "Rendered Markdown containing the failing tests summary"
+runs:
+  using: "composite"
+  steps:
+    - name: Print failing tests summary
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $glob = '${{ inputs.search_glob }}'
+        $trxFiles = Get-ChildItem -Recurse -Filter *.trx -Path . | Where-Object { $_.FullName -like $glob -or $glob -eq '**/*.trx' }
+        if ($trxFiles.Count -eq 0) {
+          Write-Host "No TRX files found for failure analysis"
+          "markdown<<EOF`n_No TRX files found for failure analysis_`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          exit 0
+        }
+
+        $summary = $env:GITHUB_STEP_SUMMARY
+        $md = "### Failed .NET tests`n"
+        $failed = 0
+
+        foreach ($trx in $trxFiles) {
+          try {
+            $nodes = Select-Xml -Path $trx.FullName -XPath "//UnitTestResult[@outcome='Failed']"
+            $groupTitle = [System.IO.Path]::GetFileNameWithoutExtension($trx.Name)
+            $groupHeader = "#### $groupTitle"
+            $groupPrinted = $false
+            foreach ($n in $nodes) {
+              $name = $n.Node.testName
+              $msg  = $n.Node.Output.ErrorInfo.Message
+              if (-not $groupPrinted) {
+                Write-Host $groupHeader
+                $md += "$groupHeader`n"
+                $groupPrinted = $true
+              }
+              $lines = @("- ❌ $name")
+              if ($msg) { $lines += "   $msg" }
+              $lines | ForEach-Object { Write-Host $_ }
+              $md += ("- ❌ {0}`n" -f $name)
+              if ($msg) { $md += ("  - {0}`n" -f $msg) }
+              $failed++
+            }
+          } catch {
+            Write-Host "Warning: Could not parse $($trx.Name): $($_.Exception.Message)"
+          }
+        }
+
+        if ($failed -eq 0) {
+          Write-Host 'No failed tests found in TRX files'
+          $md += "- No failed tests found in TRX files`n"
+        } else {
+          Write-Host "=== Total failed tests: $failed ==="
+          $md += "`nTotal failed tests: $failed`n"
+        }
+
+        if ($summary) { $md | Out-File -FilePath $summary -Encoding utf8 -Append }
+        "markdown<<EOF`n$md`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append

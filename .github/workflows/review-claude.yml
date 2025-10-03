@@ -1,0 +1,53 @@
+name: Evotec Claude Code Review
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: 'JSON array of runner labels'
+        required: false
+        default: '["ubuntu-latest"]'
+        type: string
+      direct_prompt:
+        description: 'Prompt sent to Claude for automated review'
+        required: false
+        default: |
+          Please review this pull request and provide feedback on:
+          - Code quality and best practices
+          - Potential bugs or issues
+          - Performance considerations
+          - Security concerns
+          - Test coverage
+          Be constructive and helpful in your feedback.
+        type: string
+      model:
+        description: 'Claude model id (optional)'
+        required: false
+        default: ''
+        type: string
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+jobs:
+  claude-review:
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@beta
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          direct_prompt: ${{ inputs.direct_prompt }}
+          model: ${{ inputs.model }}
+

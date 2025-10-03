@@ -1,0 +1,155 @@
+name: Evotec .NET CI
+
+on:
+  workflow_call:
+    inputs:
+      solution:
+        description: "Path to .sln (or directory to search)"
+        required: false
+        default: "**/*.sln"
+        type: string
+      build_configuration:
+        description: "Build configuration"
+        required: false
+        default: "Debug"
+        type: string
+      dotnet_versions:
+        description: 'JSON array of SDK versions (e.g. ["8.0.x"])'
+        required: false
+        default: '["8.0.x"]'
+        type: string
+      frameworks:
+        description: 'JSON array of target frameworks to test (empty = all)'
+        required: false
+        default: '[]'
+        type: string
+      os:
+        description: 'JSON array of runs-on labels (e.g. ["windows-latest"], or ["self-hosted","windows"])'
+        required: false
+        default: '["windows-latest"]'
+        type: string
+      test_verbosity:
+        description: 'minimal | normal | detailed'
+        required: false
+        default: 'minimal'
+        type: string
+      summarize_failures:
+        description: 'Show only failing tests summary when job fails'
+        required: false
+        default: true
+        type: boolean
+      enable_codecov:
+        description: 'Upload coverage to Codecov'
+        required: false
+        default: false
+        type: boolean
+      codecov_token:
+        description: 'Codecov token (if tokenless upload not enabled)'
+        required: false
+        type: string
+      restore_build_first:
+        description: 'Run restore/build before tests'
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: dotnet on ${{ matrix.os }} (SDK ${{ matrix.sdk }})
+    runs-on: ${{ fromJSON(matrix.os) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ '${{ inputs.os }}' ]
+        sdk: ${{ fromJSON(inputs.dotnet_versions) }}
+      max-parallel: 8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve solution path
+        id: sln
+        shell: pwsh
+        run: |
+          $pattern = '${{ inputs.solution }}'
+          if (Test-Path $pattern) {
+            $sln = Resolve-Path $pattern | Select-Object -First 1
+          } else {
+            $sln = Get-ChildItem -Recurse -Path . -Filter *.sln | Select-Object -Expand FullName -First 1
+          }
+          if (-not $sln) { throw "No solution .sln found (pattern: $pattern)" }
+          "sln=$sln" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Setup .NET SDK ${{ matrix.sdk }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.sdk }}
+          cache: true
+
+      - name: Restore
+        if: ${{ inputs.restore_build_first }}
+        run: dotnet restore "${{ steps.sln.outputs.sln }}"
+
+      - name: Build
+        if: ${{ inputs.restore_build_first }}
+        run: dotnet build "${{ steps.sln.outputs.sln }}" --configuration "${{ inputs.build_configuration }}" --no-restore
+
+      - name: Test
+        id: test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sln = '${{ steps.sln.outputs.sln }}'
+          $verbosity = '${{ inputs.test_verbosity }}'
+          $cfg = '${{ inputs.build_configuration }}'
+          $frameworks = @(); try { $frameworks = [Text.Json.JsonSerializer]::Deserialize('${{ inputs.frameworks }}',[object]) } catch { }
+          function Run-Test($fw) {
+            $fwArg = if ($fw) { "--framework $fw" } else { '' }
+            dotnet test $sln --configuration $cfg --no-build --verbosity $verbosity --logger "console;verbosity=$verbosity" --logger trx --collect:"XPlat Code Coverage" $fwArg
+            return $LASTEXITCODE
+          }
+          $overall = 0
+          if ($frameworks.Count -gt 0) {
+            foreach ($fw in $frameworks) {
+              $code = Run-Test $fw
+              if ($code -ne 0) { $overall = $code }
+            }
+          } else {
+            $overall = Run-Test $null
+          }
+          exit $overall
+        timeout-minutes: 30
+
+      - name: Summarize failing tests
+        if: failure() && inputs.summarize_failures
+        uses: ./.github/actions/dotnet-test-summary
+
+      - name: Upload TRX
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trx-${{ runner.os }}-${{ matrix.sdk }}
+          path: '**/*.trx'
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ runner.os }}-${{ matrix.sdk }}
+          path: '**/coverage.cobertura.xml'
+
+      - name: Upload to Codecov
+        if: always() && inputs.enable_codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: '**/coverage.cobertura.xml'
+          token: ${{ inputs.codecov_token || secrets.CODECOV_TOKEN }}
+

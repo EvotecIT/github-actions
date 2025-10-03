@@ -1,0 +1,22 @@
+name: CI (.NET)
+
+on:
+  pull_request:
+    branches: ['**']
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: ['main', 'master', 'release/**']
+
+jobs:
+  ci:
+    uses: evotecit/github-actions/.github/workflows/ci-dotnet.yml@main
+    with:
+      solution: '**/*.sln'
+      dotnet_versions: '["8.0.x"]'
+      os: '["windows-latest"]'
+      build_configuration: 'Debug'
+      test_verbosity: 'minimal'
+      summarize_failures: true
+      enable_codecov: false
+    secrets: inherit
+

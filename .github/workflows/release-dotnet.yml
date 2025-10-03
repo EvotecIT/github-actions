@@ -1,0 +1,92 @@
+name: Evotec .NET Release
+
+on:
+  workflow_call:
+    inputs:
+      projects:
+        description: 'JSON array or glob for csproj files (default: **/*.csproj)'
+        required: false
+        default: '**/*.csproj'
+        type: string
+      dotnet_version:
+        description: '.NET SDK version'
+        required: false
+        default: '8.0.x'
+        type: string
+      build_configuration:
+        description: 'Build configuration'
+        required: false
+        default: 'Release'
+        type: string
+      nuget_source:
+        description: 'NuGet source URL'
+        required: false
+        default: 'https://api.nuget.org/v3/index.json'
+        type: string
+      version:
+        description: 'Override package version (defaults to tag like v1.2.3)'
+        required: false
+        default: ''
+        type: string
+      runs_on:
+        description: 'JSON array of runner labels'
+        required: false
+        default: '["windows-latest"]'
+        type: string
+    secrets:
+      NUGET_API_KEY:
+        required: true
+
+jobs:
+  pack-and-push:
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $explicit = '${{ inputs.version }}'
+          $ver = if ($explicit) { $explicit } elseif ('${{ github.ref }}' -match 'refs/tags/v(?<v>[0-9]+\.[0-9]+\.[0-9]+.*)$') { $Matches['v'] } else { '' }
+          if (-not $ver) { throw 'Version not provided and tag not in vX.Y.Z format' }
+          "pkgver=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Restore + Build
+        shell: pwsh
+        run: |
+          $cfg = '${{ inputs.build_configuration }}'
+          dotnet restore
+          dotnet build --configuration $cfg --no-restore
+
+      - name: Pack projects
+        shell: pwsh
+        run: |
+          $cfg = '${{ inputs.build_configuration }}'
+          $ver = '${{ steps.ver.outputs.pkgver }}'
+          $pattern = '${{ inputs.projects }}'
+          $projects = @()
+          if ($pattern -like '[[]*[]]') {
+            try { $projects = [Text.Json.JsonSerializer]::Deserialize($pattern,[object]) } catch { $projects = @() }
+          }
+          if ($projects.Count -eq 0) { $projects = Get-ChildItem -Recurse -Include *.csproj -Path . | Where-Object { $_.FullName -notmatch '\\.Tests\\' } | Select-Object -Expand FullName }
+          if ($projects.Count -eq 0) { throw 'No csproj files found to pack' }
+          foreach ($p in $projects) {
+            dotnet pack "$p" --configuration $cfg -p:PackageVersion=$ver -p:ContinuousIntegrationBuild=true --no-build -o artifacts
+            if ($LASTEXITCODE -ne 0) { throw "Packing failed for $p" }
+          }
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts/*.nupkg
+
+      - name: Push to NuGet
+        run: dotnet nuget push artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source ${{ inputs.nuget_source }} --skip-duplicate
+

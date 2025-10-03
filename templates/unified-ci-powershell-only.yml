@@ -1,0 +1,43 @@
+name: Unified CI (PowerShell only)
+
+on:
+  pull_request:
+    branches: ['**']
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - '**/*.md'
+      - 'Docs/**'
+      - '**/README.*'
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.gif'
+      - '**/*.svg'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE*'
+  push:
+    branches: ['main','master','release/**']
+    paths-ignore:
+      - '**/*.md'
+      - 'Docs/**'
+      - '**/README.*'
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.gif'
+      - '**/*.svg'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE*'
+
+jobs:
+  ci:
+    uses: EvotecIT/github-actions/.github/workflows/unified-ci.yml@main
+    with:
+      runs_on: '["windows-latest"]'
+      run_tests: false
+      run_pester: true
+      rebuild_psd1: true                           # refresh PSD1 before tests
+      module_manifest: 'Module/MyModule.psd1'
+      build_script: 'Module/Build/Build-Module.ps1'
+      ps_versions: '["5.1","7"]'
+      summarize_failures: true
+      upload_artifacts: true
+    secrets: inherit

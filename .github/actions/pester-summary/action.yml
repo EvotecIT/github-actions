@@ -1,0 +1,47 @@
+name: "Pester Failed Test Summary"
+description: "Reads Pester NUnit XML and prints only failing tests to the job log and step summary; also returns Markdown output."
+inputs:
+  results_file:
+    description: "Path to NUnit XML produced by Pester"
+    required: true
+outputs:
+  markdown:
+    description: "Rendered Markdown containing the failing tests summary"
+runs:
+  using: "composite"
+  steps:
+    - name: Summarize failing Pester tests
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $file = '${{ inputs.results_file }}'
+        if (-not (Test-Path -Path $file)) {
+          Write-Host "No test results found at $file"
+          "markdown<<EOF`n_No test results found at $file_`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          exit 0
+        }
+        [xml]$xml = Get-Content -Path $file
+        $cases = $xml.SelectNodes('//test-case')
+        $summary = $env:GITHUB_STEP_SUMMARY
+        $md = "### Failed PowerShell tests`n"
+        $failed = 0
+        foreach ($c in $cases) {
+          if ($c.result -in @('Failure','Error')) {
+            $name = $c.name
+            $msg = $c.failure.message.'#text'
+            Write-Host "❌ $name"
+            if ($msg) { Write-Host "   $msg" }
+            $md += ("- ❌ {0}`n" -f $name)
+            if ($msg) { $md += ("  - {0}`n" -f $msg) }
+            $failed++
+          }
+        }
+        if ($failed -eq 0) {
+          Write-Host 'No failed tests found in result file'
+          $md += "- No failed tests found in result file`n"
+        } else {
+          Write-Host "=== Total failed tests: $failed ==="
+          $md += "`nTotal failed tests: $failed`n"
+        }
+        if ($summary) { $md | Out-File -FilePath $summary -Encoding utf8 -Append }
+        "markdown<<EOF`n$md`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append

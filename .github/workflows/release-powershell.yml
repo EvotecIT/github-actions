@@ -1,0 +1,58 @@
+name: Evotec PowerShell Release
+
+on:
+  workflow_call:
+    inputs:
+      build_script:
+        description: "Path to Build-Module.ps1"
+        required: false
+        default: "Module/Build/Build-Module.ps1"
+        type: string
+      publish_from_path:
+        description: "Folder to publish (module root)"
+        required: false
+        default: "Module"
+        type: string
+      runs_on:
+        description: 'JSON array of runner labels'
+        required: false
+        default: '["windows-latest"]'
+        type: string
+      dry_run:
+        description: 'If true, skip the actual Publish-Module call'
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      PSGALLERY_API_KEY:
+        required: true
+
+jobs:
+  build-and-publish:
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSPublishModule
+        shell: pwsh
+        run: Install-Module PSPublishModule -Force -Scope CurrentUser -AllowClobber
+
+      - name: Build module
+        shell: pwsh
+        env:
+          RefreshPSD1Only: 'false'
+        run: |
+          $script = '${{ inputs.build_script }}'
+          if (-not (Test-Path -Path $script)) { throw "Build script not found: $script" }
+          & $script
+
+      - name: Publish to PowerShell Gallery
+        if: ${{ !inputs.dry_run }}
+        shell: pwsh
+        env:
+          API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+        run: |
+          $path = '${{ inputs.publish_from_path }}'
+          if (-not (Test-Path -Path $path)) { throw "Publish path not found: $path" }
+          Publish-Module -Path $path -NuGetApiKey $Env:API_KEY -Verbose -Force
+

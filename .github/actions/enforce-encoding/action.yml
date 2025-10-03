@@ -1,0 +1,57 @@
+name: "Enforce File Encoding"
+description: "Ensures files match a target text encoding (optionally fixes)."
+inputs:
+  patterns:
+    description: "Newline-separated glob patterns (e.g. src/**/*.cs)"
+    required: true
+  mode:
+    description: "check or fix"
+    required: false
+    default: "check"
+  encoding:
+    description: "Target encoding (utf8NoBOM, utf8, ascii, unicode, etc.)"
+    required: false
+    default: "utf8NoBOM"
+runs:
+  using: "composite"
+  steps:
+    - name: Enforce encoding
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $patterns = @()
+        '${{ inputs.patterns }}'.Split("`n") | ForEach-Object { $p = $_.Trim(); if ($p) { $patterns += $p } }
+        $mode = '${{ inputs.mode }}'
+        $target = '${{ inputs.encoding }}'
+        if ($patterns.Count -eq 0) {
+          Write-Host 'No patterns provided.'; exit 0
+        }
+        $files = foreach ($pat in $patterns) { Get-ChildItem -Path $pat -File -Recurse -ErrorAction SilentlyContinue }
+        if (-not $files) { Write-Host 'No files matched patterns.'; exit 0 }
+        $bad = @()
+        foreach ($f in $files) {
+          try {
+            $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+            # naive heuristic: try UTF8 first
+            $null = [Text.Encoding]::UTF8.GetString($bytes) | Out-Null
+            $current = 'utf8'
+            # target check for NoBOM
+            $hasUtf8Bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+            if ($target -ieq 'utf8NoBOM' -and $hasUtf8Bom) { $bad += $f.FullName }
+          } catch {
+            # treat unreadable as non-text; skip
+          }
+        }
+        if ($mode -ieq 'check') {
+          if ($bad.Count -gt 0) {
+            Write-Error ("Files with wrong encoding (expected {0}):`n - {1}" -f $target, ($bad -join "`n - "))
+          } else {
+            Write-Host 'Encoding check passed.'
+          }
+        } elseif ($mode -ieq 'fix') {
+          foreach ($f in $bad) { (Get-Content -Path $f -Raw) | Set-Content -Path $f -Encoding $target }
+          Write-Host ("Fixed {0} files to {1}." -f $bad.Count, $target)
+        } else {
+          Write-Error "Unknown mode '$mode'. Use 'check' or 'fix'."
+        }
+

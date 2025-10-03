@@ -1,0 +1,44 @@
+name: Unified CI (.NET only + Codecov)
+
+on:
+  pull_request:
+    branches: ['**']
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - '**/*.md'
+      - 'Docs/**'
+      - '**/README.*'
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.gif'
+      - '**/*.svg'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE*'
+  push:
+    branches: ['main','master','release/**']
+    paths-ignore:
+      - '**/*.md'
+      - 'Docs/**'
+      - '**/README.*'
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.gif'
+      - '**/*.svg'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE*'
+
+jobs:
+  ci:
+    uses: EvotecIT/github-actions/.github/workflows/unified-ci.yml@main
+    with:
+      runs_on: '["ubuntu-latest"]'
+      run_tests: true
+      run_pester: false
+      collect_coverage: true
+      enable_codecov: true
+      dotnet_versions: '["8.0.x","9.0.x"]'
+      frameworks: '["net8.0"]'
+      summarize_failures: true
+      upload_artifacts: true
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

@@ -1,0 +1,19 @@
+name: Release (PowerShell Gallery)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    uses: evotecit/github-actions/.github/workflows/release-powershell.yml@main
+    with:
+      build_script: 'Module/Build/Build-Module.ps1'
+      publish_from_path: 'Module'
+      runs_on: '["windows-latest"]'
+      dry_run: false
+    secrets:
+      PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+

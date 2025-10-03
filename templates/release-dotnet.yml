@@ -1,0 +1,19 @@
+name: Release (.NET)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    uses: evotecit/github-actions/.github/workflows/release-dotnet.yml@main
+    with:
+      projects: '**/*.csproj'
+      build_configuration: 'Release'
+      dotnet_version: '8.0.x'
+      nuget_source: 'https://api.nuget.org/v3/index.json'
+      # version: '1.2.3' # optional; otherwise taken from tag name
+    secrets:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+

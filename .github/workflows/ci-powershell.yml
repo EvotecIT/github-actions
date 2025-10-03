@@ -1,0 +1,173 @@
+name: Evotec PowerShell Module CI
+
+on:
+  workflow_call:
+    inputs:
+      module_manifest:
+        description: "Path to module .psd1 to refresh/commit"
+        required: true
+        type: string
+      build_script:
+        description: "Path to Build-Module.ps1"
+        required: false
+        default: "Module/Build/Build-Module.ps1"
+        type: string
+      commit_psd1:
+        description: "Commit refreshed PSD1 back to branch (safe for same-repo PRs/pushes)"
+        required: false
+        default: false
+        type: boolean
+      solution:
+        description: "Optional .sln to build before tests"
+        required: false
+        default: ""
+        type: string
+      dotnet_version:
+        description: ".NET SDK for building solution"
+        required: false
+        default: "8.0.x"
+        type: string
+      ps_versions:
+        description: 'JSON array of PowerShell versions to test ("5.1" and/or "7")'
+        required: false
+        default: '["5.1","7"]'
+        type: string
+      runs_on:
+        description: 'JSON array of runner labels (e.g. ["windows-latest"] or ["self-hosted","windows"])'
+        required: false
+        default: '["windows-latest"]'
+        type: string
+      test_script:
+        description: 'Optional path to a test script to run (uses Pester if empty)'
+        required: false
+        default: ''
+        type: string
+      summarize_failures:
+        description: 'Show only failing tests summary when job fails'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  refresh-psd1:
+    name: Refresh PSD1
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Refresh PSD1
+        uses: ./.github/actions/ps-refresh-psd1
+        with:
+          build_script: ${{ inputs.build_script }}
+          manifest_path: ${{ inputs.module_manifest }}
+          commit_changes: ${{ inputs.commit_psd1 }}
+
+      - name: Upload refreshed manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: psd1
+          path: ${{ inputs.module_manifest }}
+
+  test:
+    name: PowerShell ${{ matrix.psver }}
+    needs: refresh-psd1
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        psver: ${{ fromJSON(inputs.ps_versions) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: psd1
+          path: ${{ inputs.module_manifest }}
+
+      - name: Setup .NET (optional)
+        if: ${{ inputs.solution != '' }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Install test dependencies (PowerShell 5.1)
+        if: ${{ matrix.psver == '5.1' }}
+        shell: powershell
+        run: |
+          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
+          Install-Module Pester -Force -SkipPublisherCheck -AllowClobber
+          Install-Module PSWriteColor -Force -SkipPublisherCheck -AllowClobber
+
+      - name: Install test dependencies (PowerShell 7)
+        if: ${{ matrix.psver != '5.1' }}
+        shell: pwsh
+        run: |
+          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
+          Install-Module Pester -Force -SkipPublisherCheck -AllowClobber
+          Install-Module PSWriteColor -Force -SkipPublisherCheck -AllowClobber
+
+      - name: Build .NET solution
+        if: ${{ inputs.solution != '' }}
+        run: |
+          dotnet restore "${{ inputs.solution }}"
+          dotnet build   "${{ inputs.solution }}" --configuration Debug --no-restore
+
+      - name: Run tests (PowerShell 5.1)
+        if: ${{ matrix.psver == '5.1' }}
+        shell: powershell
+        run: |
+          if ('${{ inputs.test_script }}') {
+            & '${{ inputs.test_script }}'
+          } else {
+            $cfg = New-PesterConfiguration
+            $cfg.Run.Path = 'Tests'
+            $cfg.Run.Exit = $true
+            $cfg.TestResult.Enabled = $true
+            $cfg.TestResult.OutputFormat = 'NUnitXml'
+            $cfg.TestResult.OutputPath = 'Module/TestResults.xml'
+            Invoke-Pester -Configuration $cfg
+          }
+        timeout-minutes: 30
+
+      - name: Run tests (PowerShell 7)
+        if: ${{ matrix.psver != '5.1' }}
+        shell: pwsh
+        run: |
+          if ('${{ inputs.test_script }}') {
+            & '${{ inputs.test_script }}'
+          } else {
+            $cfg = New-PesterConfiguration
+            $cfg.Run.Path = 'Tests'
+            $cfg.Run.Exit = $true
+            $cfg.TestResult.Enabled = $true
+            $cfg.TestResult.OutputFormat = 'NUnitXml'
+            $cfg.TestResult.OutputPath = 'Module/TestResults.xml'
+            Invoke-Pester -Configuration $cfg
+          }
+        timeout-minutes: 30
+
+      - name: Summarize failing tests
+        if: failure() && inputs.summarize_failures
+        uses: ./.github/actions/pester-summary
+        with:
+          results_file: Module/TestResults.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-ps${{ matrix.psver }}
+          path: Module/TestResults.xml
+

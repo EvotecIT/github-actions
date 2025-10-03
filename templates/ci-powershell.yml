@@ -1,0 +1,22 @@
+name: CI (PowerShell Module)
+
+on:
+  pull_request:
+    branches: ['**']
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: ['main', 'master', 'release/**']
+
+jobs:
+  ci:
+    uses: evotecit/github-actions/.github/workflows/ci-powershell.yml@main
+    with:
+      module_manifest: 'Module/MyModule.psd1'
+      build_script: 'Module/Build/Build-Module.ps1'
+      commit_psd1: false
+      ps_versions: '["5.1","7"]'
+      runs_on: '["windows-latest"]'
+      # solution: 'MySolution.sln'   # optional
+      # test_script: 'Module/MyModule.Tests.ps1' # optional
+    secrets: inherit
+
