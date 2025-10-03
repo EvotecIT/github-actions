@@ -1,4 +1,4 @@
-name: Maintenance: Actions Storage Cleanup
+name: "Maintenance: Actions Storage Cleanup"
 
 on:
   schedule:
@@ -26,4 +26,3 @@ jobs:
       keep_artifacts: ${{ github.event.inputs.keep_artifacts || '20' }}
       keep_caches: ${{ github.event.inputs.keep_caches || '20' }}
       runs_on: '["ubuntu-latest"]'
-

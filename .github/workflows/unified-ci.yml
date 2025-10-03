@@ -365,7 +365,7 @@ jobs:
   # PowerShell/Pester tests
   pester:
     if: ${{ inputs.run_pester }}
-    needs: ${{ inputs.rebuild_psd1 && 'refresh-psd1' || '' }}
+    needs: [refresh-psd1]
     runs-on: ${{ fromJSON(inputs.runs_on) }}
     permissions:
       contents: read

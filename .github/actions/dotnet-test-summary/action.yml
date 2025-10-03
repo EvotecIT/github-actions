@@ -8,10 +8,12 @@ inputs:
 outputs:
   markdown:
     description: "Rendered Markdown containing the failing tests summary"
+    value: ${{ steps.summarystep.outputs.markdown }}
 runs:
   using: "composite"
   steps:
-    - name: Print failing tests summary
+    - id: summarystep
+      name: Print failing tests summary
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
