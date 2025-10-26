@@ -147,16 +147,12 @@ jobs:
           "sdks=$sdkOut" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
   test:
-    name: dotnet on ${{ matrix.os }} (SDK ${{ matrix.sdk }})
+    name: dotnet (SDK ${{ matrix.sdk }})
     needs: [detect]
-    runs-on: ${{ fromJSON(matrix.os) }}
-    concurrency:
-      group: ${{ github.workflow }}-dotnet-${{ matrix.os }}-${{ matrix.sdk }}-${{ github.event.pull_request.head.sha || github.sha }}
-      cancel-in-progress: true
+    runs-on: ${{ fromJSON(inputs.os) }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ '${{ inputs.os }}' ]
         sdk: ${{ fromJSON(needs.detect.outputs.sdks) }}
         framework: ${{ fromJSON(needs.detect.outputs.frameworks) }}
       max-parallel: 8

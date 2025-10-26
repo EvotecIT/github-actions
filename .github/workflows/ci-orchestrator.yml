@@ -15,13 +15,18 @@ on:
         required: false
         default: '["windows-latest","ubuntu-latest","macos-latest"]'
         type: string
+      dotnet_frameworks:
+        description: 'JSON array of TFMs to test (optional, auto-detect when empty)'
+        required: false
+        default: '[]'
+        type: string
       enable_codecov:
         description: 'Upload coverage to Codecov in .NET jobs'
         required: false
         default: true
         type: boolean
       # PowerShell
-      run_pester:
+      ps_run:
         description: 'Run PowerShell Pester tests'
         required: false
         default: true
@@ -31,22 +36,27 @@ on:
         required: false
         default: '["5.1","7"]'
         type: string
-      module_manifest:
+      ps_runs_on:
+        description: 'JSON array of runner labels for PowerShell tests'
+        required: false
+        default: '["windows-latest"]'
+        type: string
+      ps_module_manifest:
         description: 'Path to module .psd1'
         required: false
         default: ''
         type: string
-      test_script:
+      ps_test_script:
         description: 'Optional custom Pester test script'
         required: false
         default: ''
         type: string
-      tests_path:
+      ps_tests_path:
         description: 'Folder to search for *.Tests.ps1'
         required: false
         default: 'Module/Tests'
         type: string
-      empty_tests_behavior:
+      ps_empty_tests_behavior:
         description: "Behavior when no Pester tests found: 'skip' | 'warn' | 'fail'"
         required: false
         default: 'skip'
@@ -80,6 +90,7 @@ jobs:
     with:
       os: '["windows-latest"]'
       solution: ${{ inputs.solution }}
+      frameworks: ${{ inputs.dotnet_frameworks }}
       summarize_failures: true
       enable_codecov: ${{ inputs.enable_codecov }}
     secrets: inherit
@@ -90,6 +101,7 @@ jobs:
     with:
       os: '["ubuntu-latest"]'
       solution: ${{ inputs.solution }}
+      frameworks: ${{ inputs.dotnet_frameworks }}
       summarize_failures: true
       enable_codecov: ${{ inputs.enable_codecov }}
     secrets: inherit
@@ -100,21 +112,22 @@ jobs:
     with:
       os: '["macos-latest"]'
       solution: ${{ inputs.solution }}
+      frameworks: ${{ inputs.dotnet_frameworks }}
       summarize_failures: true
       enable_codecov: ${{ inputs.enable_codecov }}
     secrets: inherit
 
   pester-windows:
-    if: ${{ inputs.run_pester }}
+    if: ${{ inputs.ps_run }}
     uses: ./.github/workflows/ci-powershell.yml
     with:
-      runs_on: '["windows-latest"]'
-      module_manifest: ${{ inputs.module_manifest }}
+      runs_on: ${{ inputs.ps_runs_on }}
+      module_manifest: ${{ inputs.ps_module_manifest }}
       solution: ${{ inputs.solution }}
       ps_versions: ${{ inputs.ps_versions }}
-      test_script: ${{ inputs.test_script }}
-      tests_path: ${{ inputs.tests_path }}
-      empty_tests_behavior: ${{ inputs.empty_tests_behavior }}
+      test_script: ${{ inputs.ps_test_script }}
+      tests_path: ${{ inputs.ps_tests_path }}
+      empty_tests_behavior: ${{ inputs.ps_empty_tests_behavior }}
       summarize_failures: true
       dotnet_version: '8.0.x'
     secrets: inherit
@@ -185,7 +198,7 @@ jobs:
           }
           foreach ($k in $results.Keys) {
             $v = ($results[$k] ?? '').ToLowerInvariant()
-            if ($v -in @('failure','cancelled')) { $jobIssues += "- ❌ $k: $v" }
+            if ($v -in @('failure','cancelled')) { $jobIssues += ("- ❌ {0}: {1}" -f $k, $v) }
           }
 
           # .NET TRX parsing
@@ -309,4 +322,3 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
-

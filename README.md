@@ -13,6 +13,7 @@ What’s included
   - `.github/workflows/unified-ci.yml` – one-switch CI for .NET + PowerShell + Claude (all-in-one; shows skipped jobs too).
   - `.github/workflows/ci-dotnet.yml` – .NET-only build/test/coverage. Auto-detects TFMs/SDKs.
   - `.github/workflows/ci-powershell.yml` – PowerShell-only Pester (5.1/7), optional PSD1 refresh.
+  - `.github/workflows/ci-orchestrator.yml` – single entry that fans out to `.NET`, `PowerShell`, Claude, and consolidated PR comment.
   - `.github/workflows/release-dotnet.yml` – pack and push NuGet packages.
   - `.github/workflows/release-powershell.yml` – publish module to PowerShell Gallery.
   - `.github/workflows/review-claude.yml` – PR code review with Claude.
@@ -129,3 +130,23 @@ Notes
 -----
 - Pin to a tag (e.g. `@v1`) once you create a release of this repo for extra safety.
 - If your `Build-Module.ps1` in `PSPublishModule` already handles encoding or manifest generation, continue using it; the CI wraps around those semantics.
+Orchestrator inputs (ci-orchestrator.yml)
+----------------------------------------
+- `solution` – path or glob to the solution; default `**/*.sln`.
+- `.NET`:
+  - `os_dotnet` – JSON of runners, default `["windows-latest","ubuntu-latest","macos-latest"]`.
+  - `dotnet_frameworks` – JSON of TFMs to test; empty means auto-detect from `*.Tests.csproj`.
+  - `enable_codecov` – upload coverage to Codecov (tokenless on public repos).
+- `PowerShell`:
+  - `ps_run` – whether to run Pester jobs (default true).
+  - `ps_versions` – JSON of PS versions, default `["5.1","7"]`.
+  - `ps_runs_on` – JSON runner labels for Pester jobs, default `["windows-latest"]`.
+  - `ps_module_manifest` – path to `.psd1`.
+  - `ps_test_script` – custom test script; otherwise, looks under `ps_tests_path`.
+  - `ps_tests_path` – folder with `*.Tests.ps1`, default `Module/Tests`.
+  - `ps_empty_tests_behavior` – `skip` | `warn` | `fail` when no tests.
+- `Claude`:
+  - `claude_review` – run Claude PR review (requires `CLAUDE_CODE_OAUTH_TOKEN`).
+  - `claude_runs_on` – JSON runner labels for Claude job.
+- Commenting:
+  - `post_pr_comment` – always post a consolidated sticky PR comment (totals table, status, failing tests, and artifacts link).
