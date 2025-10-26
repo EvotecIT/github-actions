@@ -68,7 +68,7 @@ on:
 
 jobs:
   test:
-    name: dotnet (SDK ${{ matrix.sdk }})
+    name: dotnet (SDK ${{ matrix.sdk }} | auto TFMs)
     runs-on: ${{ fromJSON(inputs.os) }}
     strategy:
       fail-fast: false
@@ -80,12 +80,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show matrix inputs
+      - name: Show SDK
         shell: pwsh
         run: |
           Write-Host "SDK: ${{ matrix.sdk }}"
-          Write-Host "Frameworks JSON (input): '${{ inputs.frameworks }}'"
-          "SDK: ${{ matrix.sdk }}`nFrameworks JSON (input): '${{ inputs.frameworks }}'" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "SDK: ${{ matrix.sdk }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Run .NET tests
         id: run

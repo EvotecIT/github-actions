@@ -20,10 +20,18 @@ if ($frameworks.Count -eq 0) {
   $testProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -match '\.Tests\.csproj$' }
   foreach ($proj in $testProjects) {
     try {
-      [xml]$xml = Get-Content -LiteralPath $proj.FullName
+      $rawXml = Get-Content -Raw -LiteralPath $proj.FullName
+      [xml]$xml = $rawXml
       $tfs = @();
       $tfs += ($xml.Project.PropertyGroup.TargetFrameworks | ForEach-Object { $_.InnerText })
       $tfs += ($xml.Project.PropertyGroup.TargetFramework  | ForEach-Object { $_.InnerText })
+      if ($tfs.Count -eq 0) {
+        # Fallback to regex if XML properties not found due to unusual layout
+        $m1 = [regex]::Match($rawXml, '<TargetFrameworks>([^<]+)</TargetFrameworks>', 'IgnoreCase')
+        if ($m1.Success) { $tfs += $m1.Groups[1].Value }
+        $m2 = [regex]::Match($rawXml, '<TargetFramework>([^<]+)</TargetFramework>', 'IgnoreCase')
+        if ($m2.Success) { $tfs += $m2.Groups[1].Value }
+      }
       foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) { [void]$testSet.Add($tf) }
     } catch { }
   }
@@ -180,6 +188,11 @@ try {
   }
   $jsonPath = Join-Path $outDir ("dotnet-notes-$($env:RUNNER_OS)-$Sdk.json")
   ($notes | ConvertTo-Json -Depth 5) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
+  # Write a quick human summary
+  if ($env:GITHUB_STEP_SUMMARY) {
+    $det = if ($frameworks -and $frameworks.Count -gt 0) { ($frameworks -join ', ') } else { '(none)' }
+    "### .NET Test Runner`n- Detected frameworks: $det`n- Library frameworks: $(@($libFrameworks) -join ', ')`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+  }
 } catch { }
 
 exit $overall
