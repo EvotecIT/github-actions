@@ -52,14 +52,17 @@ foreach ($fw in $frameworks) {
 $all = Get-ChildItem -Path 'artifacts/TestResults' -Filter *.trx -Recurse -ErrorAction SilentlyContinue
 $outDir = Join-Path $PWD 'artifacts/Counts'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+$failedTotal = 0
 foreach ($trx in $all) {
   $fw  = ($trx.Directory.Name -replace '^fw-',''); if (-not $fw) { $fw = 'all' }
   $total = 0; $failed = 0; $passed = 0; $skipped = 0
   try {
-    $nodes = Select-Xml -Path $trx.FullName -XPath "//UnitTestResult"
+    $nodes = Select-Xml -Path $trx.FullName -XPath "//*[local-name()='UnitTestResult']"
     foreach ($n in $nodes) {
       $total++
-      switch ($n.Node.outcome) {
+      $outcome = $n.Node.outcome
+      if (-not $outcome) { $outcome = $n.Node.GetAttribute('outcome') }
+      switch ($outcome) {
         'Passed' { $passed++ }
         'Failed' { $failed++ }
         'Error'  { $failed++ }
@@ -72,7 +75,7 @@ foreach ($trx in $all) {
   $obj = [ordered]@{ kind='dotnet'; os="$env:RUNNER_OS"; sdk=$Sdk; framework=$fw; total=$total; passed=$passed; failed=$failed; skipped=$skipped }
   $jsonPath = Join-Path $outDir ("dotnet-$($env:RUNNER_OS)-$Sdk-$fw.json")
   ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
+  $failedTotal += $failed
 }
 
-exit $overall
-
+if ($overall -eq 0 -and $failedTotal -gt 0) { exit 1 } else { exit $overall }

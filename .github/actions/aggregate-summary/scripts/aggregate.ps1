@@ -31,16 +31,24 @@ if ($trxFiles) {
   $netTotal = 0; $netFailed = 0; $netPassed = 0; $netSkipped = 0
   foreach ($trx in $trxFiles) {
     try {
-      $all = Select-Xml -Path $trx.FullName -XPath "//UnitTestResult"
-      $nodes = @($all | Where-Object { $_.Node.outcome -in @('Failed','Error','Timeout','Aborted') })
-      $passed = @($all | Where-Object { $_.Node.outcome -eq 'Passed' })
-      $skipped = @($all | Where-Object { $_.Node.outcome -in @('NotExecuted','Inconclusive','Skipped','Warning') })
+      $all = Select-Xml -Path $trx.FullName -XPath "//*[local-name()='UnitTestResult']"
+      $nodes = @()
+      $passed = @()
+      $skipped = @()
+      foreach ($i in $all) {
+        $outcome = $i.Node.outcome
+        if (-not $outcome) { $outcome = $i.Node.GetAttribute('outcome') }
+        if ($outcome -in @('Failed','Error','Timeout','Aborted')) { $nodes += ,$i }
+        elseif ($outcome -eq 'Passed') { $passed += ,$i }
+        elseif ($outcome -in @('NotExecuted','Inconclusive','Skipped','Warning')) { $skipped += ,$i }
+      }
       $netTotal += $all.Count; $netFailed += $nodes.Count; $netPassed += $passed.Count; $netSkipped += $skipped.Count
       $groupTitle = [System.IO.Path]::GetFileNameWithoutExtension($trx.Name)
       $printed = $false
       foreach ($n in $nodes) {
         if (-not $printed) { $md += "#### $groupTitle`n"; $printed = $true }
         $name = $n.Node.testName
+        if (-not $name) { $name = $n.Node.GetAttribute('testName') }
         $msg  = $n.Node.Output.ErrorInfo.Message
         $md += "- ❌ $name`n"
         if ($msg) { $md += "  - $msg`n" }
@@ -98,16 +106,28 @@ if ($totalAll -gt 0) {
 }
 
 # Per-matrix totals table from counts JSON (if present)
-$countFiles = Get-ChildItem -Recurse -Path $root -Filter *.json -ErrorAction SilentlyContinue
+$countFiles = Get-ChildItem -Recurse -Path $root -Filter *.json -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'artifacts[/\\]Counts' }
 $rows = @()
 foreach ($cf in $countFiles) {
   try {
     $j = Get-Content -Raw -LiteralPath $cf.FullName | ConvertFrom-Json
     if ($j.kind -eq 'dotnet') {
-      $mx = "${j.os} | SDK ${j.sdk} | ${j.framework}" -replace '\|','\\|'
+      $os = "$($j.os)"; $sdk = "$($j.sdk)"; $fw = "$($j.framework)"
+      if (-not $os -or -not $sdk -or ($null -eq $fw)) {
+        # Fallback: infer from filename like dotnet-OS-SDK-fw.json
+        $name = [System.IO.Path]::GetFileNameWithoutExtension($cf.Name) # e.g., dotnet-Windows-8.0.x-all
+        $parts = $name -split '-'
+        if ($parts.Length -ge 4) {
+          $os  = $os  ? $os  : $parts[1]
+          $sdk = $sdk ? $sdk : $parts[2]
+          $fw  = ($fw  -ne $null -and $fw -ne '') ? $fw : ($parts[3])
+        }
+      }
+      $mx = ("{0} | SDK {1} | {2}" -f $os,$sdk,$fw) -replace '\|','\\|'
       $rows += [pscustomobject]@{ Job = '.NET'; Matrix = $mx; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
     } elseif ($j.kind -eq 'pester') {
-      $mx = "Windows | PS ${j.ps}" -replace '\|','\\|'
+      $psv = "$($j.ps)"; if (-not $psv) { $psv = 'unknown' }
+      $mx = ("Windows | PS {0}" -f $psv) -replace '\|','\\|'
       $rows += [pscustomobject]@{ Job = 'PowerShell'; Matrix = $mx; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
     }
   } catch { }
@@ -119,9 +139,11 @@ if ($rows.Count -gt 0) {
 } else {
   $md = $header + "`n`n" + $md
 }
-if ($totalAll -gt 0 -and $failedAll -eq 0 -and $jobIssues.Count -eq 0) { $md += "All tests passed ✅`n" }
+# Decide final status using both TRX scan and counts table totals
+$rowsTotal = 0
+try { $rowsTotal = ($rows | Measure-Object -Property Total -Sum).Sum } catch { $rowsTotal = 0 }
+if ((($totalAll + $rowsTotal) -gt 0) -and $failedAll -eq 0 -and $jobIssues.Count -eq 0) { $md += "All tests passed ✅`n" }
 
 if ($env:GITHUB_STEP_SUMMARY) { $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
 "markdown<<EOF`n$md`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 "hasfailures=$([string]([bool]($failed -gt 0)))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
