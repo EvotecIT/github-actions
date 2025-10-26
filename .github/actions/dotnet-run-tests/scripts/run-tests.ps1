@@ -100,4 +100,9 @@ foreach ($trx in $all) {
 }
 
 # Prefer dotnet exit code; but if dotnet returned 0 and TRX shows failures, fail the step.
-if ($overall -eq 0 -and $failedTotal -gt 0) { exit 1 } else { exit $overall }
+# Enforce failure when any failed tests were detected in TRX
+if ($failedTotal -gt 0) {
+  Write-Error "Detected $failedTotal failed test(s) across TRX files. Failing step."
+  exit 1
+}
+exit $overall
