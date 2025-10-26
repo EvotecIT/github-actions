@@ -224,7 +224,7 @@ jobs:
 
       - name: Summarize failing tests
         if: failure() && inputs.summarize_failures
-        uses: ./.github/actions/dotnet-test-summary
+        uses: evotecit/github-actions/.github/actions/dotnet-test-summary@master
 
       - name: Upload TRX
         if: always()

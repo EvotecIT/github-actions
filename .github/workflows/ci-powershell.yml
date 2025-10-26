@@ -52,6 +52,16 @@ on:
         required: false
         default: true
         type: boolean
+      tests_path:
+        description: 'Path to folder with Pester tests'
+        required: false
+        default: 'Module/Tests'
+        type: string
+      empty_tests_behavior:
+        description: "Behavior when no test files are found: 'skip' | 'warn' | 'fail'"
+        required: false
+        default: 'skip'
+        type: string
 
 permissions:
   contents: write
@@ -92,6 +102,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Detect test files
+        id: tests
+        shell: pwsh
+        run: |
+          $path = '${{ inputs.tests_path }}'
+          $exists = Test-Path -Path $path
+          $count = 0
+          if ($exists) {
+            $count = (Get-ChildItem -Path $path -Recurse -File -Include *.Tests.ps1,*.tests.ps1 -ErrorAction SilentlyContinue | Measure-Object).Count
+          }
+          Write-Host "Found $count test files under $path"
+          "has_tests=$([string]([bool]($count -gt 0)))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Download manifest
         if: ${{ inputs.rebuild_psd1 }}
         uses: actions/download-artifact@v4
@@ -128,7 +151,7 @@ jobs:
           dotnet build   "${{ inputs.solution }}" --configuration Debug --no-restore
 
       - name: Run tests (PowerShell 5.1)
-        if: ${{ matrix.psver == '5.1' }}
+        if: ${{ matrix.psver == '5.1' && steps.tests.outputs.has_tests == 'true' }}
         shell: powershell
         run: |
           if ('${{ inputs.test_script }}') {
@@ -145,7 +168,7 @@ jobs:
         timeout-minutes: 30
 
       - name: Run tests (PowerShell 7)
-        if: ${{ matrix.psver != '5.1' }}
+        if: ${{ matrix.psver != '5.1' && steps.tests.outputs.has_tests == 'true' }}
         shell: pwsh
         run: |
           if ('${{ inputs.test_script }}') {
@@ -162,14 +185,28 @@ jobs:
         timeout-minutes: 30
 
       - name: Summarize failing tests
-        if: failure() && inputs.summarize_failures
-        uses: ./.github/actions/pester-summary
+        if: failure() && inputs.summarize_failures && steps.tests.outputs.has_tests == 'true'
+        uses: evotecit/github-actions/.github/actions/pester-summary@master
         with:
           results_file: Module/TestResults.xml
 
       - name: Upload test results
-        if: always()
+        if: always() && steps.tests.outputs.has_tests == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: test-results-ps${{ matrix.psver }}
           path: Module/TestResults.xml
+
+      - name: No tests found policy
+        if: ${{ steps.tests.outputs.has_tests == 'false' }}
+        shell: pwsh
+        env:
+          EMPTY_BEHAVIOR: ${{ inputs.empty_tests_behavior }}
+          SUMMARY_PATH: ${{ env.GITHUB_STEP_SUMMARY }}
+        run: |
+          $msg = "No Pester test files found under '${{ inputs.tests_path }}'."
+          switch (($env:EMPTY_BEHAVIOR ?? 'skip').ToLowerInvariant()) {
+            'fail' { Write-Error $msg; if ($env:SUMMARY_PATH) { "### PowerShell (Pester)`n- ❌ $msg`n" | Out-File -FilePath $env:SUMMARY_PATH -Append -Encoding utf8 }; exit 1 }
+            'warn' { Write-Warning $msg; if ($env:SUMMARY_PATH) { "### PowerShell (Pester)`n- ⚠️ $msg`n" | Out-File -FilePath $env:SUMMARY_PATH -Append -Encoding utf8 } }
+            Default { Write-Host $msg; if ($env:SUMMARY_PATH) { "### PowerShell (Pester)`n- ℹ️ $msg`n" | Out-File -FilePath $env:SUMMARY_PATH -Append -Encoding utf8 } }
+          }
