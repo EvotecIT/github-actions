@@ -119,6 +119,7 @@ jobs:
           }
           $fwOut = ($frameworks | ConvertTo-Json -Compress)
           "frameworks=$fwOut" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Detected frameworks: $fwOut"
 
           # sdks
           $sdks = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -146,6 +147,7 @@ jobs:
           if ($sdks.Count -eq 0) { [void]$sdks.Add('8.0.x') }
           $sdkOut = ($sdks | ConvertTo-Json -Compress)
           "sdks=$sdkOut" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Detected SDKs: $sdkOut"
 
   test:
     name: dotnet (SDK ${{ matrix.sdk }})

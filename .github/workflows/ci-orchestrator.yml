@@ -91,7 +91,7 @@ on:
 jobs:
   dotnet-windows:
     if: contains(fromJSON(inputs.os_dotnet), 'windows-latest')
-    uses: ./.github/workflows/ci-dotnet.yml
+    uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
       os: '["windows-latest"]'
       solution: ${{ inputs.solution }}
@@ -103,7 +103,7 @@ jobs:
 
   dotnet-ubuntu:
     if: contains(fromJSON(inputs.os_dotnet), 'ubuntu-latest')
-    uses: ./.github/workflows/ci-dotnet.yml
+    uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
       os: '["ubuntu-latest"]'
       solution: ${{ inputs.solution }}
@@ -115,7 +115,7 @@ jobs:
 
   dotnet-macos:
     if: contains(fromJSON(inputs.os_dotnet), 'macos-latest')
-    uses: ./.github/workflows/ci-dotnet.yml
+    uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
       os: '["macos-latest"]'
       solution: ${{ inputs.solution }}
@@ -127,7 +127,7 @@ jobs:
 
   pester-windows:
     if: ${{ inputs.ps_run }}
-    uses: ./.github/workflows/ci-powershell.yml
+    uses: EvotecIT/github-actions/.github/workflows/ci-powershell.yml@master
     with:
       runs_on: ${{ inputs.ps_runs_on }}
       module_manifest: ${{ inputs.ps_module_manifest }}
