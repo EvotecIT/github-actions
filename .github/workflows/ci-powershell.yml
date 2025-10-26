@@ -104,69 +104,7 @@ jobs:
           dotnet_version: ${{ inputs.dotnet_version }}
         timeout-minutes: 30
 
-      # Detection now happens inside the pester-runner composite
-
-      - name: Setup .NET (optional)
-        if: ${{ false }}
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ inputs.dotnet_version }}
-
-      - name: Install test dependencies (PowerShell 5.1)
-        if: ${{ false }}
-        shell: powershell
-        run: |
-          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
-          Install-Module Pester -Force -SkipPublisherCheck -AllowClobber
-          Install-Module PSWriteColor -Force -SkipPublisherCheck -AllowClobber
-
-      - name: Install test dependencies (PowerShell 7)
-        if: ${{ false }}
-        shell: pwsh
-        run: |
-          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
-          Install-Module Pester -Force -SkipPublisherCheck -AllowClobber
-          Install-Module PSWriteColor -Force -SkipPublisherCheck -AllowClobber
-
-      - name: Build .NET solution
-        if: ${{ false }}
-        run: |
-          dotnet restore "${{ inputs.solution }}"
-          dotnet build   "${{ inputs.solution }}" --configuration Debug --no-restore
-
-      - name: Run tests (PowerShell 5.1)
-        if: ${{ false }}
-        shell: powershell
-        run: |
-          if ('${{ inputs.test_script }}') {
-            & '${{ inputs.test_script }}'
-          } else {
-            $cfg = New-PesterConfiguration
-            $cfg.Run.Path = '${{ inputs.tests_path }}'
-            $cfg.Run.Exit = $true
-            $cfg.TestResult.Enabled = $true
-            $cfg.TestResult.OutputFormat = 'NUnitXml'
-            $cfg.TestResult.OutputPath = 'Module/TestResults.xml'
-            Invoke-Pester -Configuration $cfg
-          }
-        timeout-minutes: 30
-
-      - name: Run tests (PowerShell 7)
-        if: ${{ false }}
-        shell: pwsh
-        run: |
-          if ('${{ inputs.test_script }}') {
-            & '${{ inputs.test_script }}'
-          } else {
-            $cfg = New-PesterConfiguration
-            $cfg.Run.Path = '${{ inputs.tests_path }}'
-            $cfg.Run.Exit = $true
-            $cfg.TestResult.Enabled = $true
-            $cfg.TestResult.OutputFormat = 'NUnitXml'
-            $cfg.TestResult.OutputPath = 'Module/TestResults.xml'
-            Invoke-Pester -Configuration $cfg
-          }
-        timeout-minutes: 30
+      # Detection and execution happen inside the pester-runner composite
 
       - name: Summarize failing tests
         if: failure() && inputs.summarize_failures && steps.run.outputs.has_tests == 'true'
@@ -188,8 +126,4 @@ jobs:
           name: counts-pester-${{ matrix.psver }}
           path: ${{ steps.run.outputs.counts_glob }}
 
-      - name: Emit empty counts when no tests
-        if: ${{ false }}
-        shell: pwsh
-        run: |
-          Write-Host 'Replaced by pester-runner'
+      # Empty-counts handling is implemented by the composite

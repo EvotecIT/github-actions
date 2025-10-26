@@ -108,6 +108,7 @@ if ($totalAll -gt 0) {
 # Per-matrix totals table from counts JSON (if present)
 $countFiles = Get-ChildItem -Recurse -Path $root -Filter *.json -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'artifacts[/\\]Counts' }
 $rows = @()
+$pesterNoteRows = @()
 foreach ($cf in $countFiles) {
   try {
     $j = Get-Content -Raw -LiteralPath $cf.FullName | ConvertFrom-Json
@@ -129,6 +130,9 @@ foreach ($cf in $countFiles) {
       $psv = "$($j.ps)"; if (-not $psv) { $psv = 'unknown' }
       $mx = ("Windows | PS {0}" -f $psv) -replace '\|','\\|'
       $rows += [pscustomobject]@{ Job = 'PowerShell'; Matrix = $mx; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
+      if ($j.total -eq 0 -and $j.PSObject.Properties.Name -contains 'note' -and $j.note) {
+        $pesterNoteRows += [pscustomobject]@{ Version = $psv; Note = [string]$j.note }
+      }
     }
   } catch { }
 }
@@ -139,6 +143,9 @@ if ($rows.Count -gt 0) {
 } else {
   $md = $header + "`n`n" + $md
 }
+$noteLines = @()
+foreach ($p in $pesterNoteRows) { $noteLines += ("- ℹ️ PowerShell {0}: {1}" -f $p.Version, $p.Note) }
+if ($noteLines.Count -gt 0) { $md += "`n### PowerShell (Pester) — No tests detected`n" + ($noteLines -join "`n") + "`n" }
 # Decide final status using both TRX scan and counts table totals
 $rowsTotal = 0
 try { $rowsTotal = ($rows | Measure-Object -Property Total -Sum).Sum } catch { $rowsTotal = 0 }
