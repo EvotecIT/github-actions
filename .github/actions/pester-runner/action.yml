@@ -1,0 +1,158 @@
+name: "Pester Runner"
+description: "Run Pester tests for a module on PS 5.1 or 7, produce NUnit XML and counts, with configurable empty-tests behavior"
+inputs:
+  psver:
+    description: "PowerShell version: '5.1' or '7'"
+    required: true
+  tests_path:
+    description: "Path to Pester tests folder"
+    required: false
+    default: 'Module/Tests'
+  test_script:
+    description: "Optional script to run instead of Pester configuration"
+    required: false
+    default: ''
+  results_file:
+    description: "Path to NUnit XML output"
+    required: false
+    default: 'Module/TestResults.xml'
+  empty_tests_behavior:
+    description: "Behavior when no tests: skip|warn|fail"
+    required: false
+    default: 'skip'
+  install_deps:
+    description: "Install Pester/PSWriteColor before running"
+    required: false
+    default: 'true'
+  solution:
+    description: "Optional .sln to build before tests"
+    required: false
+    default: ''
+  dotnet_version:
+    description: ".NET SDK for building solution"
+    required: false
+    default: '8.0.x'
+outputs:
+  has_tests:
+    description: "Whether any test files were found"
+    value: ${{ steps.detect.outputs.has_tests }}
+  results_file:
+    description: "Path to test results XML (when produced)"
+    value: ${{ inputs.results_file }}
+  counts_glob:
+    description: "Glob for counts JSON files"
+    value: artifacts/Counts/*.json
+runs:
+  using: composite
+  steps:
+    - name: Detect test files
+      id: detect
+      shell: pwsh
+      run: |
+        $path = '${{ inputs.tests_path }}'
+        $exists = Test-Path -Path $path
+        $count = 0
+        if ($exists) {
+          $count = (Get-ChildItem -Path $path -Recurse -File -Include *.Tests.ps1,*.tests.ps1 -ErrorAction SilentlyContinue | Measure-Object).Count
+        }
+        Write-Host "Found $count test files under $path"
+        "has_tests=$([string]([bool]($count -gt 0)))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+    - name: Setup .NET (optional)
+      if: ${{ inputs.solution != '' }}
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.dotnet_version }}
+
+    - name: Build .NET solution (optional)
+      if: ${{ inputs.solution != '' }}
+      shell: bash
+      run: |
+        dotnet restore "${{ inputs.solution }}"
+        dotnet build   "${{ inputs.solution }}" --configuration Debug --no-restore
+
+    - name: Install test dependencies (PowerShell 5.1)
+      if: ${{ inputs.install_deps == 'true' && inputs.psver == '5.1' }}
+      shell: powershell
+      run: |
+        Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
+        Install-Module Pester -Force -SkipPublisherCheck -AllowClobber
+        Install-Module PSWriteColor -Force -SkipPublisherCheck -AllowClobber
+
+    - name: Install test dependencies (PowerShell 7)
+      if: ${{ inputs.install_deps == 'true' && inputs.psver != '5.1' }}
+      shell: pwsh
+      run: |
+        Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
+        Install-Module Pester -Force -SkipPublisherCheck -AllowClobber
+        Install-Module PSWriteColor -Force -SkipPublisherCheck -AllowClobber
+
+    - name: Run tests (5.1)
+      if: ${{ steps.detect.outputs.has_tests == 'true' && inputs.psver == '5.1' }}
+      shell: powershell
+      run: |
+        & "${{ github.action_path }}/scripts/run-pester.ps1" -TestsPath "${{ inputs.tests_path }}" -ResultsFile "${{ inputs.results_file }}" -TestScript "${{ inputs.test_script }}"
+
+    - name: Run tests (7)
+      if: ${{ steps.detect.outputs.has_tests == 'true' && inputs.psver != '5.1' }}
+      shell: pwsh
+      run: |
+        & "${{ github.action_path }}/scripts/run-pester.ps1" -TestsPath "${{ inputs.tests_path }}" -ResultsFile "${{ inputs.results_file }}" -TestScript "${{ inputs.test_script }}"
+
+    - name: Emit test counts JSON
+      if: ${{ steps.detect.outputs.has_tests == 'true' }}
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $total = 0; $failed = 0; $passed = 0; $skipped = 0
+        if (Test-Path '${{ inputs.results_file }}') {
+          [xml]$xml = Get-Content -LiteralPath '${{ inputs.results_file }}'
+          $cases = @($xml.SelectNodes('//test-case'))
+          foreach ($c in $cases) {
+            $total++
+            $res = ($c.result + '')
+            switch ($res) {
+              'Passed' { $passed++ }
+              'Failure' { $failed++ }
+              'Error' { $failed++ }
+              'Skipped' { $skipped++ }
+              'Ignored' { $skipped++ }
+              'Inconclusive' { $skipped++ }
+              default { $skipped++ }
+            }
+          }
+        }
+        $obj = [ordered]@{
+          kind   = 'pester'
+          os     = 'Windows'
+          ps     = '${{ inputs.psver }}'
+          total  = $total
+          passed = $passed
+          failed = $failed
+          skipped= $skipped
+        }
+        $outDir = Join-Path $PWD 'artifacts/Counts'
+        New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+        $jsonPath = Join-Path $outDir ("pester-${{ inputs.psver }}.json")
+        ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
+
+    - name: No tests found policy
+      if: ${{ steps.detect.outputs.has_tests == 'false' }}
+      shell: pwsh
+      env:
+        EMPTY_BEHAVIOR: ${{ inputs.empty_tests_behavior }}
+      run: |
+        $msg = "No Pester test files found under '${{ inputs.tests_path }}'."
+        # Emit an empty counts file for the aggregator/table
+        $obj = [ordered]@{ kind='pester'; os='Windows'; ps='${{ inputs.psver }}'; total=0; passed=0; failed=0; skipped=0; note=$msg }
+        $outDir = Join-Path $PWD 'artifacts/Counts'
+        New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+        $jsonPath = Join-Path $outDir ("pester-${{ inputs.psver }}.json")
+        ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
+
+        switch (($env:EMPTY_BEHAVIOR ?? 'skip').ToLowerInvariant()) {
+          'fail' { if ($env:GITHUB_STEP_SUMMARY) { "### PowerShell (Pester)`n- ❌ $msg`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }; exit 1 }
+          'warn' { if ($env:GITHUB_STEP_SUMMARY) { "### PowerShell (Pester)`n- ⚠️ $msg`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 } }
+          Default { if ($env:GITHUB_STEP_SUMMARY) { "### PowerShell (Pester)`n- ℹ️ $msg`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 } }
+        }
+

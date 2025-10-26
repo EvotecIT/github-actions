@@ -1,0 +1,98 @@
+name: "Dotnet Run Tests"
+description: "Restore/build (optional), auto-detect TFMs, run dotnet test with TRX and optional coverage, and emit per-framework counts"
+inputs:
+  solution:
+    description: "Path or glob to .sln"
+    required: true
+  sdk:
+    description: ".NET SDK version (e.g. 8.0.x)"
+    required: true
+  build_configuration:
+    description: "Build configuration"
+    required: false
+    default: Release
+  test_verbosity:
+    description: "minimal|normal|detailed"
+    required: false
+    default: minimal
+  frameworks:
+    description: "JSON array of TFMs (empty = auto-detect)"
+    required: false
+    default: '[]'
+  restore_build_first:
+    description: "Run restore/build before tests"
+    required: false
+    default: 'true'
+  enable_coverage:
+    description: "Collect XPlat Code Coverage"
+    required: false
+    default: 'true'
+outputs:
+  trx_glob:
+    description: "Glob pattern for TRX files"
+    value: ${{ steps.out.outputs.trx_glob }}
+  coverage_glob:
+    description: "Glob pattern for coverage files"
+    value: ${{ steps.out.outputs.coverage_glob }}
+  counts_dir:
+    description: "Directory where counts JSON were emitted"
+    value: ${{ steps.out.outputs.counts_dir }}
+  counts_glob:
+    description: "Glob pattern for counts JSON"
+    value: ${{ steps.out.outputs.counts_glob }}
+runs:
+  using: composite
+  steps:
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.sdk }}
+
+    - id: sln
+      name: Resolve solution
+      shell: pwsh
+      run: |
+        $pattern = '${{ inputs.solution }}'
+        if (Test-Path $pattern) {
+          $sln = Resolve-Path $pattern | Select-Object -First 1
+        } else {
+          $sln = Get-ChildItem -Recurse -Path . -Filter *.sln | Select-Object -Expand FullName -First 1
+        }
+        if (-not $sln) { throw "No solution .sln found (pattern: $pattern)" }
+        "sln=$sln" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+    - name: Restore
+      if: ${{ inputs.restore_build_first == 'true' }}
+      shell: bash
+      run: |
+        dotnet restore "${{ steps.sln.outputs.sln }}"
+
+    - name: Build
+      if: ${{ inputs.restore_build_first == 'true' }}
+      shell: bash
+      run: |
+        dotnet build "${{ steps.sln.outputs.sln }}" --configuration "${{ inputs.build_configuration }}" --no-restore
+
+    - id: run
+      name: Run tests
+      shell: pwsh
+      env:
+        SDK: ${{ inputs.sdk }}
+      run: |
+        & "${{ github.action_path }}/scripts/run-tests.ps1" `
+          -Solution "${{ steps.sln.outputs.sln }}" `
+          -Configuration "${{ inputs.build_configuration }}" `
+          -Verbosity "${{ inputs.test_verbosity }}" `
+          -FrameworksJson "${{ inputs.frameworks }}" `
+          -EnableCoverage ([bool]::Parse('${{ inputs.enable_coverage }}')) `
+          -Sdk "$env:SDK"
+
+    - id: out
+      name: Emit outputs
+      shell: pwsh
+      run: |
+        "trx_glob=artifacts/TestResults/**/*.trx" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        "coverage_glob=**/coverage.cobertura.xml" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        "counts_dir=$PWD/artifacts/Counts" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        "counts_glob=artifacts/Counts/*.json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+

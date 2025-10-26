@@ -84,79 +84,20 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "SDK: ${{ matrix.sdk }}"
-          Write-Host "Framework (matrix): '${{ matrix.framework }}'"
           Write-Host "Frameworks JSON (input): '${{ inputs.frameworks }}'"
-          "SDK: ${{ matrix.sdk }}`nFramework (matrix): '${{ matrix.framework }}'" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "SDK: ${{ matrix.sdk }}`nFrameworks JSON (input): '${{ inputs.frameworks }}'" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-      - name: Resolve solution path
-        id: sln
-        shell: pwsh
-        run: |
-          $pattern = '${{ inputs.solution }}'
-          if (Test-Path $pattern) {
-            $sln = Resolve-Path $pattern | Select-Object -First 1
-          } else {
-            $sln = Get-ChildItem -Recurse -Path . -Filter *.sln | Select-Object -Expand FullName -First 1
-          }
-          if (-not $sln) { throw "No solution .sln found (pattern: $pattern)" }
-          "sln=$sln" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Setup .NET SDK ${{ matrix.sdk }}
-        uses: actions/setup-dotnet@v4
+      - name: Run .NET tests
+        id: run
+        uses: evotecit/github-actions/.github/actions/dotnet-run-tests@master
         with:
-          dotnet-version: ${{ matrix.sdk }}
-
-      - name: Restore
-        if: ${{ inputs.restore_build_first }}
-        run: dotnet restore "${{ steps.sln.outputs.sln }}"
-
-      - name: Build
-        if: ${{ inputs.restore_build_first }}
-        run: dotnet build "${{ steps.sln.outputs.sln }}" --configuration "${{ inputs.build_configuration }}" --no-restore
-
-      - name: Test
-        id: test
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $sln = '${{ steps.sln.outputs.sln }}'
-          $verbosity = '${{ inputs.test_verbosity }}'
-          $cfg = '${{ inputs.build_configuration }}'
-          # Determine frameworks: use input or auto-detect from *.Tests.csproj
-          $frameworks = @(); try { $raw = '${{ inputs.frameworks }}'; if ($raw -and $raw -ne '[]') { $frameworks = ConvertFrom-Json -InputObject $raw } } catch { }
-          if ($frameworks.Count -eq 0) {
-            $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-            $testProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -match '\\.Tests\\.csproj$' }
-            foreach ($proj in $testProjects) {
-              try {
-                [xml]$xml = Get-Content -LiteralPath $proj.FullName
-                $tfs = @();
-                $tfs += ($xml.Project.PropertyGroup.TargetFrameworks | ForEach-Object { $_.InnerText })
-                $tfs += ($xml.Project.PropertyGroup.TargetFramework  | ForEach-Object { $_.InnerText })
-                foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) { [void]$set.Add($tf) }
-              } catch { }
-            }
-            $frameworks = @($set)
-            if ($env:RUNNER_OS -ne 'Windows') { $frameworks = @($frameworks | Where-Object { $_ -notmatch '^net4' }) }
-          }
-          if ($frameworks.Count -eq 0) { $frameworks = @('') }
-
-          function Run-Test($fw) {
-            $fwArg = if ($fw) { "--framework $fw" } else { '' }
-            $fwSafe = if ($fw) { $fw } else { 'all' }
-            $subdir = Join-Path -Path 'artifacts/TestResults' -ChildPath ("fw-$fwSafe")
-            New-Item -ItemType Directory -Force -Path $subdir | Out-Null
-            $logName = "results-$fwSafe.trx"
-            dotnet test $sln --configuration $cfg --no-build --verbosity $verbosity --logger "console;verbosity=$verbosity" --logger "trx;LogFileName=$logName" --results-directory "$subdir" --collect:"XPlat Code Coverage" $fwArg
-            return $LASTEXITCODE
-          }
-
-          $overall = 0
-          foreach ($fw in $frameworks) {
-            $code = Run-Test $fw
-            if ($code -ne 0) { $overall = $code }
-          }
-          exit $overall
+          solution: ${{ inputs.solution }}
+          sdk: ${{ matrix.sdk }}
+          build_configuration: ${{ inputs.build_configuration }}
+          test_verbosity: ${{ inputs.test_verbosity }}
+          frameworks: ${{ inputs.frameworks }}
+          restore_build_first: ${{ inputs.restore_build_first }}
+          enable_coverage: true
         timeout-minutes: 30
 
       - name: Summarize failing tests
@@ -168,56 +109,26 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: trx-${{ runner.os }}-${{ matrix.sdk }}
-          path: 'artifacts/TestResults/**/*.trx'
+          path: ${{ steps.run.outputs.trx_glob }}
 
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ runner.os }}-${{ matrix.sdk }}
-          path: '**/coverage.cobertura.xml'
+          path: ${{ steps.run.outputs.coverage_glob }}
 
       - name: Upload to Codecov
         # Only attempt upload when coverage files exist AND a token is available
-        if: inputs.enable_codecov && (inputs.codecov_token != '' || secrets.CODECOV_TOKEN) && hashFiles('**/coverage.cobertura.xml') != ''
+        if: inputs.enable_codecov && (inputs.codecov_token != '' || secrets.CODECOV_TOKEN) && hashFiles(steps.run.outputs.coverage_glob) != ''
         uses: codecov/codecov-action@v4
         with:
           files: '**/coverage.cobertura.xml'
           token: ${{ inputs.codecov_token || secrets.CODECOV_TOKEN }}
-
-      - name: Emit test counts JSON
-        if: always()
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $all = Get-ChildItem -Path 'artifacts/TestResults' -Filter *.trx -Recurse -ErrorAction SilentlyContinue
-          $outDir = Join-Path $PWD 'artifacts/Counts'
-          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-          foreach ($trx in $all) {
-            $fw  = ($trx.Directory.Name -replace '^fw-',''); if (-not $fw) { $fw = 'all' }
-            $total = 0; $failed = 0; $passed = 0; $skipped = 0
-            try {
-              $nodes = Select-Xml -Path $trx.FullName -XPath "//UnitTestResult"
-              foreach ($n in $nodes) {
-                $total++
-                switch ($n.Node.outcome) {
-                  'Passed' { $passed++ }
-                  'Failed' { $failed++ }
-                  'Error'  { $failed++ }
-                  'Timeout' { $failed++ }
-                  'Aborted' { $failed++ }
-                  default { $skipped++ }
-                }
-              }
-            } catch { }
-            $obj = [ordered]@{ kind='dotnet'; os="$env:RUNNER_OS"; sdk='${{ matrix.sdk }}'; framework=$fw; total=$total; passed=$passed; failed=$failed; skipped=$skipped }
-            $jsonPath = Join-Path $outDir ("dotnet-$($env:RUNNER_OS)-${{ matrix.sdk }}-$fw.json")
-            ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
-          }
 
       - name: Upload test counts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: counts-${{ runner.os }}-${{ matrix.sdk }}
-          path: artifacts/Counts/*.json
+          path: ${{ steps.run.outputs.counts_glob }}
