@@ -207,9 +207,59 @@ jobs:
           name: psd1
           path: ${{ inputs.module_manifest }}
 
+  # Detect test frameworks (TFMs) automatically when not provided
+  detect:
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    outputs:
+      frameworks: ${{ steps.out.outputs.frameworks }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+      - name: Detect test frameworks
+        id: out
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # If frameworks were provided explicitly, honor them
+          $provided = '${{ inputs.frameworks }}'
+          try { $parsed = [Text.Json.JsonSerializer]::Deserialize($provided,[object]) } catch { $parsed = @() }
+          if ($parsed -and $parsed.Count -gt 0) {
+            $json = [Text.Json.JsonSerializer]::Serialize($parsed)
+            "frameworks=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+
+          # Otherwise scan *.Tests.csproj and union their TFMs
+          $testProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -match '\.Tests\.csproj$' }
+          $frameworks = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+          foreach ($proj in $testProjects) {
+            try {
+              [xml]$xml = Get-Content -LiteralPath $proj.FullName
+              $tfs = @()
+              $tfs += ($xml.Project.PropertyGroup.TargetFrameworks | ForEach-Object { $_.InnerText })
+              $tfs += ($xml.Project.PropertyGroup.TargetFramework  | ForEach-Object { $_.InnerText })
+              foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) {
+                [void]$frameworks.Add($tf)
+              }
+            } catch { }
+          }
+
+          # Filter frameworks by OS (avoid .NET Framework on non-Windows)
+          $isWindows = $env:RUNNER_OS -eq 'Windows'
+          if (-not $isWindows) {
+            $toRemove = @()
+            foreach ($f in $frameworks) { if ($f -match '^net4') { $toRemove += $f } }
+            foreach ($f in $toRemove) { [void]$frameworks.Remove($f) }
+          }
+
+          $out = if ($frameworks.Count -gt 0) { $frameworks } else { @('') } # empty string => no -f
+          $json = $out | ConvertTo-Json -Compress
+          "frameworks=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
   # .NET build/test
   dotnet:
     if: ${{ inputs.run_tests }}
+    needs: [detect]
     runs-on: ${{ fromJSON(inputs.runs_on) }}
     permissions:
       contents: read
@@ -219,6 +269,7 @@ jobs:
       fail-fast: false
       matrix:
         sdk: ${{ fromJSON(inputs.dotnet_versions) }}
+        framework: ${{ fromJSON(needs.detect.outputs.frameworks) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -270,6 +321,7 @@ jobs:
             $resultsDir = Join-Path -Path 'artifacts/TestResults' -ChildPath $projName
             New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
 
+            $matrixFw = '${{ matrix.framework }}'
             function Run-Test($fw) {
               $fwArg = if ($fw) { "--framework $fw" } else { '' }
               $logName = if ($fw) { "$projName-$fw.trx" } else { "$projName.trx" }
@@ -280,11 +332,11 @@ jobs:
               return $LASTEXITCODE
             }
 
-            if ($frameworks.Count -gt 0) {
-              foreach ($fw in $frameworks) { $code = Run-Test $fw; if ($code -ne 0) { $overall = $code } }
-            } else {
-              $code = Run-Test $null; if ($code -ne 0) { $overall = $code }
-            }
+            # Prefer matrix.framework when present; otherwise honor explicit input list; otherwise run once without -f
+            if ($matrixFw -ne '') { $code = Run-Test $matrixFw }
+            elseif ($frameworks.Count -gt 0) { foreach ($fw in $frameworks) { $code = Run-Test $fw; if ($code -ne 0) { $overall = $code } } }
+            else { $code = Run-Test $null }
+            if ($code -ne 0) { $overall = $code }
           }
 
           exit $overall
@@ -299,14 +351,14 @@ jobs:
         if: always() && inputs.upload_artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: trx-${{ runner.os }}-${{ matrix.sdk }}
+          name: trx-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework || 'all' }}
           path: '**/*.trx'
 
       - name: Upload coverage
         if: always() && inputs.upload_artifacts && inputs.collect_coverage
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ runner.os }}-${{ matrix.sdk }}
+          name: coverage-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework || 'all' }}
           path: '**/coverage.cobertura.xml'
 
       - name: Upload to Codecov
@@ -320,7 +372,7 @@ jobs:
         if: failure() && inputs.post_summary_issue
         uses: actions/github-script@v7
         env:
-          SUMMARY_MARKER: ${{ inputs.summary_comment_tag }}-dotnet-${{ matrix.sdk }}
+          SUMMARY_MARKER: ${{ inputs.summary_comment_tag }}-dotnet-${{ matrix.sdk }}-${{ matrix.framework || 'all' }}
         with:
           script: |
             const owner = context.repo.owner;
