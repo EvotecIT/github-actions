@@ -61,14 +61,14 @@ runs:
         if (-not $sln) { throw "No solution .sln found (pattern: $pattern)" }
         "sln=$sln" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-    - name: Restore
-      if: ${{ inputs.restore_build_first == 'true' }}
+    - name: Restore (Windows only)
+      if: ${{ inputs.restore_build_first == 'true' && runner.os == 'Windows' }}
       shell: bash
       run: |
         dotnet restore "${{ steps.sln.outputs.sln }}"
 
-    - name: Build
-      if: ${{ inputs.restore_build_first == 'true' }}
+    - name: Build (Windows only)
+      if: ${{ inputs.restore_build_first == 'true' && runner.os == 'Windows' }}
       shell: bash
       run: |
         dotnet build "${{ steps.sln.outputs.sln }}" --configuration "${{ inputs.build_configuration }}" --no-restore
@@ -95,4 +95,3 @@ runs:
         "coverage_glob=**/coverage.cobertura.xml" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         "counts_dir=$PWD/artifacts/Counts" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         "counts_glob=artifacts/Counts/*.json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-

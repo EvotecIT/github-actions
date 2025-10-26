@@ -64,12 +64,18 @@ function Run-Test($fw) {
   New-Item -ItemType Directory -Force -Path $subdir | Out-Null
   $logName = "results-$fwSafe.trx"
   $collect = $EnableCoverage ? '--collect:"XPlat Code Coverage"' : ''
-  $cmd = "dotnet test `"$Solution`" --configuration $Configuration --no-build --verbosity $Verbosity --logger `"console;verbosity=$Verbosity`" --logger `"trx;LogFileName=$logName`" --results-directory `"$subdir`" $collect $fwArg"
+  $cmd = "dotnet test `"$Solution`" --configuration $Configuration --verbosity $Verbosity --logger `"console;verbosity=$Verbosity`" --logger `"trx;LogFileName=$logName`" --results-directory `"$subdir`" $collect $fwArg"
   Write-Host $cmd
-  & dotnet test $Solution --configuration $Configuration --no-build --verbosity $Verbosity --logger "console;verbosity=$Verbosity" --logger "trx;LogFileName=$logName" --results-directory "$subdir" $collect $fwArg
-  return $LASTEXITCODE
+  $logsDir = Join-Path $PWD 'artifacts/Logs'
+  New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+  $logPath = Join-Path $logsDir ("dotnet-$fwSafe.log")
+  & dotnet test $Solution --configuration $Configuration --verbosity $Verbosity --logger "console;verbosity=$Verbosity" --logger "trx;LogFileName=$logName" --results-directory "$subdir" $collect $fwArg *>&1 | Tee-Object -FilePath $logPath
+  $code = $LASTEXITCODE
+  $script:FrameworkRuns["$fwSafe"] = @{ Code = $code; Log = $logPath; Subdir = $subdir; RawFramework = $fw }
+  return $code
 }
 
+$script:FrameworkRuns = @{}
 $overall = 0
 foreach ($fw in $frameworks) {
   $code = Run-Test $fw
@@ -132,6 +138,32 @@ foreach ($trx in $all) {
 if ($failedTotal -gt 0) {
   Write-Error "Detected $failedTotal failed test(s) across TRX files. Failing step."
   exit 1
+}
+
+# Emit build/test error JSON for frameworks that failed before producing TRX
+foreach ($key in $script:FrameworkRuns.Keys) {
+  $info = $script:FrameworkRuns[$key]
+  $fwRaw = [string]$info.RawFramework
+  if ($info.Code -ne 0) {
+    $expectedTrx = Join-Path $info.Subdir "results-$key.trx"
+    if (-not (Test-Path $expectedTrx)) {
+      try {
+        $msg = ''
+        if (Test-Path $info.Log) {
+          $errs = Select-String -Path $info.Log -Pattern '(^CSC\s*:.*error)|(error\s+[A-Z]*\d+)|(^Test Run Aborted)' -SimpleMatch:$false -AllMatches -ErrorAction SilentlyContinue
+          if ($errs) {
+            $msg = ($errs | Select-Object -First 3 | ForEach-Object { $_.Line.Trim() }) -join '; '
+          } else {
+            $tail = Get-Content -LiteralPath $info.Log -Tail 20 -ErrorAction SilentlyContinue
+            $msg = ($tail -join ' ')
+          }
+        }
+        $obj = [ordered]@{ kind='dotnet-error'; os="$env:RUNNER_OS"; sdk=$Sdk; framework=$fwRaw; message=$msg }
+        $jsonPath = Join-Path $outDir ("dotnet-error-$($env:RUNNER_OS)-$Sdk-$key.json")
+        ($obj | ConvertTo-Json -Depth 5) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
+      } catch { }
+    }
+  }
 }
 
 # Emit a note JSON describing library vs test TFMs for the aggregator

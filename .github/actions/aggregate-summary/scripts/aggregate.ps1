@@ -174,6 +174,24 @@ $noteLines = @()
 foreach ($p in $pesterNoteRows) { $noteLines += ("- ℹ️ PowerShell {0}: {1}" -f $p.Version, $p.Note) }
 if ($noteLines.Count -gt 0) { $md += "`n### PowerShell (Pester) — No tests detected`n" + ($noteLines -join "`n") + "`n" }
 
+# Build/Test errors where TRX wasn't produced
+$errorFiles = Get-ChildItem -Recurse -Path $root -Filter *.json -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'artifacts[/\\]Counts' }
+$dotnetErrors = @()
+foreach ($ef in $errorFiles) {
+  try { $je = Get-Content -Raw -LiteralPath $ef.FullName | ConvertFrom-Json } catch { continue }
+  if ($je.kind -ne 'dotnet-error') { continue }
+  $fwDisp = & $tfmMap $je.framework
+  $dotnetErrors += [pscustomobject]@{ OS=$je.os; SDK=$je.sdk; Framework=$fwDisp; Message=$je.message }
+}
+if ($dotnetErrors.Count -gt 0) {
+  $md += "`n### .NET Build/Test errors`n"
+  foreach ($e in $dotnetErrors) {
+    $msg = if ($e.Message) { $e.Message } else { 'See logs in artifacts/Logs' }
+    $md += ("- ❌ {0} | SDK {1} | {2}: {3}`n" -f $e.OS,$e.SDK,$e.Framework,$msg)
+    $failed++
+  }
+}
+
 # Notes about .NET frameworks not exercised by the tests
 if (${global:DotnetMissingNotes} -and ${global:DotnetMissingNotes}.Count -gt 0) {
   $md += "`n### .NET — Frameworks not tested`n"
