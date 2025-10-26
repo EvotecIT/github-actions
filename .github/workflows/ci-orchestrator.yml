@@ -288,9 +288,13 @@ jobs:
             try {
               $j = Get-Content -Raw -LiteralPath $cf.FullName | ConvertFrom-Json
               if ($j.kind -eq 'dotnet') {
-                $rows += [pscustomobject]@{ Job = '.NET'; Matrix = "${j.os} | SDK ${j.sdk} | ${j.framework}"; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
+                $mx = "${j.os} | SDK ${j.sdk} | ${j.framework}"
+                $mx = $mx -replace '\|', '\\|'
+                $rows += [pscustomobject]@{ Job = '.NET'; Matrix = $mx; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
               } elseif ($j.kind -eq 'pester') {
-                $rows += [pscustomobject]@{ Job = 'PowerShell'; Matrix = "Windows | PS ${j.ps}"; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
+                $mx = "Windows | PS ${j.ps}"
+                $mx = $mx -replace '\|', '\\|'
+                $rows += [pscustomobject]@{ Job = 'PowerShell'; Matrix = $mx; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
               }
             } catch { }
           }
@@ -301,7 +305,7 @@ jobs:
           } else {
             $md = $header + "`n`n" + $md
           }
-          if ($failed -eq 0) { $md += "All tests passed ✅`n" }
+          if ($totalAll -gt 0 -and $failedAll -eq 0 -and $jobIssues.Count -eq 0) { $md += "All tests passed ✅`n" }
 
           if ($env:GITHUB_STEP_SUMMARY) { $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
           "markdown<<EOF`n$md`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append

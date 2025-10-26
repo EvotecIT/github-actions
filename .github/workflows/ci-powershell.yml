@@ -4,8 +4,9 @@ on:
   workflow_call:
     inputs:
       module_manifest:
-        description: "Path to module .psd1 to refresh/commit"
-        required: true
+        description: "Path to module .psd1 to refresh/commit (optional when rebuild_psd1=false)"
+        required: false
+        default: ''
         type: string
       build_script:
         description: "Path to Build-Module.ps1"
@@ -67,26 +68,6 @@ permissions:
   contents: write
 
 jobs:
-  refresh-psd1:
-    if: ${{ inputs.rebuild_psd1 }}
-    name: Refresh PSD1
-    runs-on: ${{ fromJSON(inputs.runs_on) }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Refresh PSD1
-        uses: ./.github/actions/ps-refresh-psd1
-        with:
-          build_script: ${{ inputs.build_script }}
-          manifest_path: ${{ inputs.module_manifest }}
-          commit_changes: ${{ inputs.commit_psd1 }}
-      - name: Upload refreshed manifest
-        uses: actions/upload-artifact@v4
-        with:
-          name: psd1
-          path: ${{ inputs.module_manifest }}
-
   test:
     name: PowerShell ${{ matrix.psver }}
     runs-on: ${{ fromJSON(inputs.runs_on) }}
@@ -102,6 +83,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Refresh PSD1 (optional)
+        if: ${{ inputs.rebuild_psd1 && inputs.module_manifest != '' }}
+        uses: ./.github/actions/ps-refresh-psd1
+        with:
+          build_script: ${{ inputs.build_script }}
+          manifest_path: ${{ inputs.module_manifest }}
+          commit_changes: ${{ inputs.commit_psd1 }}
+
       - name: Detect test files
         id: tests
         shell: pwsh
@@ -114,13 +103,6 @@ jobs:
           }
           Write-Host "Found $count test files under $path"
           "has_tests=$([string]([bool]($count -gt 0)))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Download manifest
-        if: ${{ inputs.rebuild_psd1 }}
-        uses: actions/download-artifact@v4
-        with:
-          name: psd1
-          path: ${{ inputs.module_manifest }}
 
       - name: Setup .NET (optional)
         if: ${{ inputs.solution != '' }}
@@ -158,7 +140,7 @@ jobs:
             & '${{ inputs.test_script }}'
           } else {
             $cfg = New-PesterConfiguration
-            $cfg.Run.Path = 'Tests'
+            $cfg.Run.Path = '${{ inputs.tests_path }}'
             $cfg.Run.Exit = $true
             $cfg.TestResult.Enabled = $true
             $cfg.TestResult.OutputFormat = 'NUnitXml'
@@ -175,7 +157,7 @@ jobs:
             & '${{ inputs.test_script }}'
           } else {
             $cfg = New-PesterConfiguration
-            $cfg.Run.Path = 'Tests'
+            $cfg.Run.Path = '${{ inputs.tests_path }}'
             $cfg.Run.Exit = $true
             $cfg.TestResult.Enabled = $true
             $cfg.TestResult.OutputFormat = 'NUnitXml'
@@ -236,6 +218,32 @@ jobs:
 
       - name: Upload test counts
         if: always() && steps.tests.outputs.has_tests == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: counts-pester-${{ matrix.psver }}
+          path: artifacts/Counts/*.json
+
+      - name: Emit empty counts when no tests
+        if: ${{ steps.tests.outputs.has_tests == 'false' }}
+        shell: pwsh
+        run: |
+          $obj = [ordered]@{
+            kind   = 'pester'
+            os     = 'Windows'
+            ps     = "${{ matrix.psver }}"
+            total  = 0
+            passed = 0
+            failed = 0
+            skipped= 0
+            note   = "No Pester test files found under '${{ inputs.tests_path }}' (treated as '${{ inputs.empty_tests_behavior }}')."
+          }
+          $outDir = Join-Path $PWD 'artifacts/Counts'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $jsonPath = Join-Path $outDir ("pester-${{ matrix.psver }}.json")
+          ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
+      
+      - name: Upload empty counts
+        if: ${{ steps.tests.outputs.has_tests == 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: counts-pester-${{ matrix.psver }}
