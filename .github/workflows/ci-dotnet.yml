@@ -119,12 +119,15 @@ jobs:
           path: ${{ steps.run.outputs.coverage_glob }}
 
       - name: Upload to Codecov
-        # Only attempt upload when coverage files exist AND a token is available
-        if: inputs.enable_codecov && (inputs.codecov_token != '' || secrets.CODECOV_TOKEN) && hashFiles(steps.run.outputs.coverage_glob) != ''
+        # Only attempt upload when coverage files exist; token is picked from input or env if provided
+        if: inputs.enable_codecov && hashFiles('**/coverage.cobertura.xml') != ''
         uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           files: '**/coverage.cobertura.xml'
-          token: ${{ inputs.codecov_token || secrets.CODECOV_TOKEN }}
+          token: ${{ inputs.codecov_token }}
+          fail_ci_if_error: false
 
       - name: Upload test counts
         if: always()
