@@ -162,6 +162,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Show matrix inputs
+        shell: pwsh
+        run: |
+          Write-Host "SDK: ${{ matrix.sdk }}"
+          Write-Host "Framework (matrix): '${{ matrix.framework }}'"
+          Write-Host "Frameworks JSON (input): '${{ inputs.frameworks }}'"
+          "SDK: ${{ matrix.sdk }}`nFramework (matrix): '${{ matrix.framework }}'" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - name: Resolve solution path
         id: sln
         shell: pwsh
