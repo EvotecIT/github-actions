@@ -57,18 +57,39 @@ foreach ($trx in $all) {
   $fw  = ($trx.Directory.Name -replace '^fw-',''); if (-not $fw) { $fw = 'all' }
   $total = 0; $failed = 0; $passed = 0; $skipped = 0
   try {
-    $nodes = Select-Xml -Path $trx.FullName -XPath "//*[local-name()='UnitTestResult']"
-    foreach ($n in $nodes) {
-      $total++
-      $outcome = $n.Node.outcome
-      if (-not $outcome) { $outcome = $n.Node.GetAttribute('outcome') }
-      switch ($outcome) {
-        'Passed' { $passed++ }
-        'Failed' { $failed++ }
-        'Error'  { $failed++ }
-        'Timeout' { $failed++ }
-        'Aborted' { $failed++ }
-        default { $skipped++ }
+    # Prefer Counters when present (robust across TRX variants)
+    $counters = Select-Xml -Path $trx.FullName -XPath "//*[local-name()='Counters']" | Select-Object -First 1
+    if ($counters) {
+      $n = $counters.Node
+      $toInt = { param($v) try { [int]$v } catch { 0 } }
+      $total  = & $toInt ($n.GetAttribute('total'))
+      $passed = & $toInt ($n.GetAttribute('passed'))
+      $failed = (& $toInt ($n.GetAttribute('failed'))) + (& $toInt ($n.GetAttribute('error'))) + (& $toInt ($n.GetAttribute('timeout'))) + (& $toInt ($n.GetAttribute('aborted')))
+      $skipped = $total - $passed - $failed
+      if ($skipped -lt 0) {
+        $skipped = (& $toInt ($n.GetAttribute('notExecuted'))) + (& $toInt ($n.GetAttribute('inconclusive'))) + (& $toInt ($n.GetAttribute('warning')))
+      }
+    } else {
+      # Fallback to per-test outcomes
+      $nodes = Select-Xml -Path $trx.FullName -XPath "//*[local-name()='UnitTestResult']"
+      foreach ($n in $nodes) {
+        $total++
+        $outcome = $n.Node.outcome; if (-not $outcome) { $outcome = $n.Node.GetAttribute('outcome') }
+        switch ($outcome) {
+          'Passed' { $passed++ }
+          'Failed' { $failed++ }
+          'Error'  { $failed++ }
+          'Timeout' { $failed++ }
+          'Aborted' { $failed++ }
+          default { $skipped++ }
+        }
+      }
+      if ($total -eq 0) {
+        # Last-resort textual scan
+        $raw = Get-Content -Raw -LiteralPath $trx.FullName
+        $failed += ([regex]::Matches($raw, 'outcome="(Failed|Error|Timeout|Aborted)"', 'IgnoreCase')).Count
+        $passed += ([regex]::Matches($raw, 'outcome="Passed"', 'IgnoreCase')).Count
+        $total = $failed + $passed
       }
     }
   } catch { }
@@ -78,4 +99,5 @@ foreach ($trx in $all) {
   $failedTotal += $failed
 }
 
+# Prefer dotnet exit code; but if dotnet returned 0 and TRX shows failures, fail the step.
 if ($overall -eq 0 -and $failedTotal -gt 0) { exit 1 } else { exit $overall }

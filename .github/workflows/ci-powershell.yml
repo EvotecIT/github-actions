@@ -124,6 +124,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: counts-pester-${{ matrix.psver }}
-          path: ${{ steps.run.outputs.counts_glob }}
+          path: artifacts/Counts/*.json
 
       # Empty-counts handling is implemented by the composite

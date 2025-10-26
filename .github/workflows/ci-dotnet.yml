@@ -109,7 +109,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: trx-${{ runner.os }}-${{ matrix.sdk }}
-          path: ${{ steps.run.outputs.trx_glob }}
+          path: artifacts/TestResults/**/*.trx
 
       - name: Upload coverage
         if: always()
@@ -134,4 +134,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: counts-${{ runner.os }}-${{ matrix.sdk }}
-          path: ${{ steps.run.outputs.counts_glob }}
+          path: artifacts/Counts/*.json

@@ -101,9 +101,19 @@ if ($jobIssues.Count -gt 0) {
 }
 
 $header = "## CI Failing Tests Summary";
-if ($totalAll -gt 0) {
-  $header += (" — {0} failed, {1} passed, {2} skipped ({3} total)" -f $failedAll, $passedAll, $skippedAll, $totalAll)
+# Prefer TRX/NUnit-derived totals; if none, fall back to counts table totals
+$rowsFailedSum = 0; $rowsPassedSum = 0; $rowsSkippedSum = 0; $rowsTotalSum = 0
+try {
+  $rowsFailedSum  = ($rows  | Measure-Object -Property Failed  -Sum).Sum
+  $rowsPassedSum  = ($rows  | Measure-Object -Property Passed  -Sum).Sum
+  $rowsSkippedSum = ($rows  | Measure-Object -Property Skipped -Sum).Sum
+  $rowsTotalSum   = ($rows  | Measure-Object -Property Total   -Sum).Sum
+} catch { }
+$hFailed  = $failedAll; $hPassed = $passedAll; $hSkipped = $skippedAll; $hTotal = $totalAll
+if ($hTotal -le 0 -and $rowsTotalSum -gt 0) {
+  $hFailed = $rowsFailedSum; $hPassed = $rowsPassedSum; $hSkipped = $rowsSkippedSum; $hTotal = $rowsTotalSum
 }
+if ($hTotal -gt 0) { $header += (" — {0} failed, {1} passed, {2} skipped ({3} total)" -f $hFailed, $hPassed, $hSkipped, $hTotal) }
 
 # Per-matrix totals table from counts JSON (if present)
 $countFiles = Get-ChildItem -Recurse -Path $root -Filter *.json -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'artifacts[/\\]Counts' }
@@ -149,7 +159,7 @@ if ($noteLines.Count -gt 0) { $md += "`n### PowerShell (Pester) — No tests det
 # Decide final status using both TRX scan and counts table totals
 $rowsTotal = 0
 try { $rowsTotal = ($rows | Measure-Object -Property Total -Sum).Sum } catch { $rowsTotal = 0 }
-if ((($totalAll + $rowsTotal) -gt 0) -and $failedAll -eq 0 -and $jobIssues.Count -eq 0) { $md += "All tests passed ✅`n" }
+if ((($totalAll + $rowsTotal) -gt 0) -and ($failedAll + $rowsFailedSum) -eq 0 -and $jobIssues.Count -eq 0) { $md += "All tests passed ✅`n" }
 
 if ($env:GITHUB_STEP_SUMMARY) { $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
 "markdown<<EOF`n$md`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
