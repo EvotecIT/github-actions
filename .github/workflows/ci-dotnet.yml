@@ -68,6 +68,7 @@ on:
 
 jobs:
   detect:
+    if: ${{ false }}
     name: detect (frameworks, sdks)
     runs-on: ${{ fromJSON(inputs.os) }}
     outputs:
@@ -151,13 +152,11 @@ jobs:
 
   test:
     name: dotnet (SDK ${{ matrix.sdk }})
-    needs: [detect]
     runs-on: ${{ fromJSON(inputs.os) }}
     strategy:
       fail-fast: false
       matrix:
-        sdk: ${{ fromJSON(needs.detect.outputs.sdks) }}
-        framework: ${{ fromJSON(needs.detect.outputs.frameworks) }}
+        sdk: ${{ fromJSON(inputs.dotnet_versions) }}
       max-parallel: 8
 
     steps:
@@ -207,24 +206,39 @@ jobs:
           $sln = '${{ steps.sln.outputs.sln }}'
           $verbosity = '${{ inputs.test_verbosity }}'
           $cfg = '${{ inputs.build_configuration }}'
+          # Determine frameworks: use input or auto-detect from *.Tests.csproj
           $frameworks = @(); try { $raw = '${{ inputs.frameworks }}'; if ($raw -and $raw -ne '[]') { $frameworks = ConvertFrom-Json -InputObject $raw } } catch { }
+          if ($frameworks.Count -eq 0) {
+            $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            $testProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -match '\\.Tests\\.csproj$' }
+            foreach ($proj in $testProjects) {
+              try {
+                [xml]$xml = Get-Content -LiteralPath $proj.FullName
+                $tfs = @();
+                $tfs += ($xml.Project.PropertyGroup.TargetFrameworks | ForEach-Object { $_.InnerText })
+                $tfs += ($xml.Project.PropertyGroup.TargetFramework  | ForEach-Object { $_.InnerText })
+                foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) { [void]$set.Add($tf) }
+              } catch { }
+            }
+            $frameworks = @($set)
+            if ($env:RUNNER_OS -ne 'Windows') { $frameworks = @($frameworks | Where-Object { $_ -notmatch '^net4' }) }
+          }
+          if ($frameworks.Count -eq 0) { $frameworks = @('') }
+
           function Run-Test($fw) {
             $fwArg = if ($fw) { "--framework $fw" } else { '' }
-            $logName = if ($fw) { "results-$fw.trx" } else { "results.trx" }
-            dotnet test $sln --configuration $cfg --no-build --verbosity $verbosity --logger "console;verbosity=$verbosity" --logger "trx;LogFileName=$logName" --results-directory "artifacts/TestResults" --collect:"XPlat Code Coverage" $fwArg
+            $fwSafe = if ($fw) { $fw } else { 'all' }
+            $subdir = Join-Path -Path 'artifacts/TestResults' -ChildPath ("fw-$fwSafe")
+            New-Item -ItemType Directory -Force -Path $subdir | Out-Null
+            $logName = "results-$fwSafe.trx"
+            dotnet test $sln --configuration $cfg --no-build --verbosity $verbosity --logger "console;verbosity=$verbosity" --logger "trx;LogFileName=$logName" --results-directory "$subdir" --collect:"XPlat Code Coverage" $fwArg
             return $LASTEXITCODE
           }
+
           $overall = 0
-          $matrixFw = '${{ matrix.framework }}'
-          if ($matrixFw) {
-            $overall = Run-Test $matrixFw
-          } elseif ($frameworks.Count -gt 0) {
-            foreach ($fw in $frameworks) {
-              $code = Run-Test $fw
-              if ($code -ne 0) { $overall = $code }
-            }
-          } else {
-            $overall = Run-Test $null
+          foreach ($fw in $frameworks) {
+            $code = Run-Test $fw
+            if ($code -ne 0) { $overall = $code }
           }
           exit $overall
         timeout-minutes: 30
@@ -237,14 +251,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trx-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework || 'all' }}
-          path: 'artifacts/TestResults/*.trx'
+          name: trx-${{ runner.os }}-${{ matrix.sdk }}
+          path: 'artifacts/TestResults/**/*.trx'
 
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework || 'all' }}
+          name: coverage-${{ runner.os }}-${{ matrix.sdk }}
           path: '**/coverage.cobertura.xml'
 
       - name: Upload to Codecov
@@ -256,15 +270,15 @@ jobs:
 
       - name: Emit test counts JSON
         if: always()
-        id: counts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $dir = Join-Path $PWD 'artifacts/TestResults'
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          $all = Get-ChildItem -Path $dir -Filter *.trx -ErrorAction SilentlyContinue
-          $total = 0; $failed = 0; $passed = 0; $skipped = 0
+          $all = Get-ChildItem -Path 'artifacts/TestResults' -Filter *.trx -Recurse -ErrorAction SilentlyContinue
+          $outDir = Join-Path $PWD 'artifacts/Counts'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
           foreach ($trx in $all) {
+            $fw  = ($trx.Directory.Name -replace '^fw-',''); if (-not $fw) { $fw = 'all' }
+            $total = 0; $failed = 0; $passed = 0; $skipped = 0
             try {
               $nodes = Select-Xml -Path $trx.FullName -XPath "//UnitTestResult"
               foreach ($n in $nodes) {
@@ -279,25 +293,14 @@ jobs:
                 }
               }
             } catch { }
+            $obj = [ordered]@{ kind='dotnet'; os="$env:RUNNER_OS"; sdk='${{ matrix.sdk }}'; framework=$fw; total=$total; passed=$passed; failed=$failed; skipped=$skipped }
+            $jsonPath = Join-Path $outDir ("dotnet-$($env:RUNNER_OS)-${{ matrix.sdk }}-$fw.json")
+            ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
           }
-          $obj = [ordered]@{
-            kind      = 'dotnet'
-            os        = "$env:RUNNER_OS"
-            sdk       = "${{ matrix.sdk }}"
-            framework = "${{ matrix.framework || 'all' }}"
-            total     = $total
-            passed    = $passed
-            failed    = $failed
-            skipped   = $skipped
-          }
-          $outDir = Join-Path $PWD 'artifacts/Counts'
-          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-          $jsonPath = Join-Path $outDir ("dotnet-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework || 'all' }}.json")
-          ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
 
       - name: Upload test counts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: counts-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework || 'all' }}
+          name: counts-${{ runner.os }}-${{ matrix.sdk }}
           path: artifacts/Counts/*.json
