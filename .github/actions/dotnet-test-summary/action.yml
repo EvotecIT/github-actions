@@ -31,12 +31,18 @@ runs:
 
         foreach ($trx in $trxFiles) {
           try {
-            $nodes = Select-Xml -Path $trx.FullName -XPath "//UnitTestResult[@outcome='Failed']"
+            # Namespace-safe selection of failed test results
+            $all = Select-Xml -Path $trx.FullName -XPath "//*[local-name()='UnitTestResult']"
+            $failedNodes = @()
+            foreach ($n in $all) {
+              $outcome = $n.Node.outcome; if (-not $outcome) { $outcome = $n.Node.GetAttribute('outcome') }
+              if ($outcome -in @('Failed','Error','Timeout','Aborted')) { $failedNodes += ,$n }
+            }
             $groupTitle = [System.IO.Path]::GetFileNameWithoutExtension($trx.Name)
             $groupHeader = "#### $groupTitle"
             $groupPrinted = $false
-            foreach ($n in $nodes) {
-              $name = $n.Node.testName
+            foreach ($n in $failedNodes) {
+              $name = $n.Node.testName; if (-not $name) { $name = $n.Node.GetAttribute('testName') }
               $msg  = $n.Node.Output.ErrorInfo.Message
               if (-not $groupPrinted) {
                 Write-Host $groupHeader

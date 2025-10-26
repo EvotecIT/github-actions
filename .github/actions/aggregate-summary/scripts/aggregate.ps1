@@ -12,6 +12,16 @@ $failed = 0
 $jobIssues = @()
 $totalAll = 0; $failedAll = 0; $passedAll = 0; $skippedAll = 0
 
+# Friendly TFM display mapper
+$tfmMap = {
+  param($tfm)
+  if (-not $tfm) { return '' }
+  if ($tfm -match '^netstandard(\d+)\.(\d+)$') { return "NetStandard$($Matches[1]).$($Matches[2])" }
+  if ($tfm -match '^net(\d+)\.(\d+)$') { return "Net$($Matches[1]).$($Matches[2])" }
+  if ($tfm -match '^net(\d)(\d)(\d)$') { return "NetFramework$($Matches[1]).$($Matches[2]).$($Matches[3])" }
+  return $tfm
+}
+
 # Job results (failure/cancelled)
 $results = @{
   '.NET (Windows)'      = $env:RES_DOTNET_WINDOWS
@@ -119,6 +129,7 @@ if ($hTotal -gt 0) { $header += (" — {0} failed, {1} passed, {2} skipped ({3} 
 $countFiles = Get-ChildItem -Recurse -Path $root -Filter *.json -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'artifacts[/\\]Counts' }
 $rows = @()
 $pesterNoteRows = @()
+${global:DotnetMissingNotes} = @()
 foreach ($cf in $countFiles) {
   try {
     $j = Get-Content -Raw -LiteralPath $cf.FullName | ConvertFrom-Json
@@ -134,7 +145,8 @@ foreach ($cf in $countFiles) {
           $fw  = ($fw  -ne $null -and $fw -ne '') ? $fw : ($parts[3])
         }
       }
-      $mx = ("{0} | SDK {1} | {2}" -f $os,$sdk,$fw) -replace '\|','\\|'
+      $fwDisp = & $tfmMap $fw
+      $mx = ("{0} | SDK {1} | {2}" -f $os,$sdk,$fwDisp) -replace '\|','\\|'
       $rows += [pscustomobject]@{ Job = '.NET'; Matrix = $mx; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
     } elseif ($j.kind -eq 'pester') {
       $psv = "$($j.ps)"; if (-not $psv) { $psv = 'unknown' }
@@ -142,6 +154,11 @@ foreach ($cf in $countFiles) {
       $rows += [pscustomobject]@{ Job = 'PowerShell'; Matrix = $mx; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
       if ($j.total -eq 0 -and $j.PSObject.Properties.Name -contains 'note' -and $j.note) {
         $pesterNoteRows += [pscustomobject]@{ Version = $psv; Note = [string]$j.note }
+      }
+    } elseif ($j.kind -eq 'dotnet-notes') {
+      $missing = @($j.missing_for_tests | ForEach-Object { & $tfmMap $_ })
+      if ($missing.Count -gt 0) {
+        ${global:DotnetMissingNotes} += [pscustomobject]@{ OS=$j.os; SDK=$j.sdk; Missing=$missing }
       }
     }
   } catch { }
@@ -156,6 +173,14 @@ if ($rows.Count -gt 0) {
 $noteLines = @()
 foreach ($p in $pesterNoteRows) { $noteLines += ("- ℹ️ PowerShell {0}: {1}" -f $p.Version, $p.Note) }
 if ($noteLines.Count -gt 0) { $md += "`n### PowerShell (Pester) — No tests detected`n" + ($noteLines -join "`n") + "`n" }
+
+# Notes about .NET frameworks not exercised by the tests
+if (${global:DotnetMissingNotes} -and ${global:DotnetMissingNotes}.Count -gt 0) {
+  $md += "`n### .NET — Frameworks not tested`n"
+  foreach ($n in ${global:DotnetMissingNotes}) {
+    $md += ("- {0} | SDK {1}: {2}`n" -f $n.OS,$n.SDK,($n.Missing -join ', '))
+  }
+}
 # Decide final status using both TRX scan and counts table totals
 $rowsTotal = 0
 try { $rowsTotal = ($rows | Measure-Object -Property Total -Sum).Sum } catch { $rowsTotal = 0 }

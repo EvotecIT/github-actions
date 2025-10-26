@@ -9,11 +9,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Determine frameworks: use input or auto-detect from *.Tests.csproj
+# Determine frameworks: explicit input or auto-detect
 $frameworks = @()
 try { if ($FrameworksJson -and $FrameworksJson -ne '[]') { $frameworks = ConvertFrom-Json -InputObject $FrameworksJson } } catch { }
+
+# Detect test project TFMs
+$testFrameworks = @()
 if ($frameworks.Count -eq 0) {
-  $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $testSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
   $testProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -match '\.Tests\.csproj$' }
   foreach ($proj in $testProjects) {
     try {
@@ -21,13 +24,38 @@ if ($frameworks.Count -eq 0) {
       $tfs = @();
       $tfs += ($xml.Project.PropertyGroup.TargetFrameworks | ForEach-Object { $_.InnerText })
       $tfs += ($xml.Project.PropertyGroup.TargetFramework  | ForEach-Object { $_.InnerText })
-      foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) { [void]$set.Add($tf) }
+      foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) { [void]$testSet.Add($tf) }
     } catch { }
   }
-  $frameworks = @($set)
-  if ($env:RUNNER_OS -ne 'Windows') { $frameworks = @($frameworks | Where-Object { $_ -notmatch '^net4' }) }
+  $testFrameworks = @($testSet)
+  if ($env:RUNNER_OS -ne 'Windows') { $testFrameworks = @($testFrameworks | Where-Object { $_ -notmatch '^net4' }) }
 }
-if ($frameworks.Count -eq 0) { $frameworks = @('') }
+
+# Detect main library TFMs
+$libFrameworks = @()
+try {
+  $libSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $libProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -notmatch '\.Tests\.csproj$' }
+  foreach ($proj in $libProjects) {
+    try {
+      [xml]$xml = Get-Content -LiteralPath $proj.FullName
+      $tfs = @();
+      $tfs += ($xml.Project.PropertyGroup.TargetFrameworks | ForEach-Object { $_.InnerText })
+      $tfs += ($xml.Project.PropertyGroup.TargetFramework  | ForEach-Object { $_.InnerText })
+      foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) { [void]$libSet.Add($tf) }
+    } catch { }
+  }
+  $libFrameworks = @($libSet)
+} catch { }
+
+# Choose frameworks to run: tests TFMs (if auto) or provided input
+if ($frameworks.Count -eq 0) {
+  if ($testFrameworks.Count -gt 0) { $frameworks = $testFrameworks } else { $frameworks = @('') }
+}
+
+# Note any library TFMs that are not testable by current test projects
+$missingForTests = @()
+foreach ($lf in $libFrameworks) { if ($lf -notin $frameworks) { $missingForTests += $lf } }
 
 function Run-Test($fw) {
   $fwArg = if ($fw) { "--framework $fw" } else { '' }
@@ -105,4 +133,21 @@ if ($failedTotal -gt 0) {
   Write-Error "Detected $failedTotal failed test(s) across TRX files. Failing step."
   exit 1
 }
+
+# Emit a note JSON describing library vs test TFMs for the aggregator
+try {
+  $outDir = Join-Path $PWD 'artifacts/Counts'
+  New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+  $notes = [ordered]@{
+    kind = 'dotnet-notes'
+    os   = $env:RUNNER_OS
+    sdk  = $Sdk
+    lib_frameworks      = @($libFrameworks)
+    test_frameworks     = @($frameworks)
+    missing_for_tests   = @($missingForTests)
+  }
+  $jsonPath = Join-Path $outDir ("dotnet-notes-$($env:RUNNER_OS)-$Sdk.json")
+  ($notes | ConvertTo-Json -Depth 5) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
+} catch { }
+
 exit $overall
