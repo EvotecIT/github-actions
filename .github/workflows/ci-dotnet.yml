@@ -52,23 +52,113 @@ on:
         required: false
         default: true
         type: boolean
+      auto_detect_sdks:
+        description: 'Automatically detect SDKs from global.json and TFMs'
+        required: false
+        default: true
+        type: boolean
+      auto_detect_frameworks:
+        description: 'Automatically detect TFMs from *.Tests.csproj when frameworks is empty'
+        required: false
+        default: true
+        type: boolean
     secrets:
       CODECOV_TOKEN:
         required: false
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: true
-
 jobs:
+  detect:
+    name: detect (frameworks, sdks)
+    runs-on: ${{ fromJSON(inputs.os) }}
+    outputs:
+      frameworks: ${{ steps.out.outputs.frameworks }}
+      sdks: ${{ steps.out.outputs.sdks }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Resolve and detect
+        id: out
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # solution
+          $pattern = '${{ inputs.solution }}'
+          if (Test-Path $pattern) {
+            $sln = Resolve-Path $pattern | Select-Object -First 1
+          } else {
+            $sln = Get-ChildItem -Recurse -Path . -Filter *.sln | Select-Object -Expand FullName -First 1
+          }
+          if (-not $sln) { throw "No solution .sln found (pattern: $pattern)" }
+          "sln=$sln" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          # frameworks
+          $fwJson = '${{ inputs.frameworks }}'
+          $autoFw = [System.Convert]::ToBoolean('${{ inputs.auto_detect_frameworks }}')
+          $frameworks = @()
+          try { $frameworks = [Text.Json.JsonSerializer]::Deserialize($fwJson,[object]) } catch { $frameworks = @() }
+          if ($autoFw -and ($null -eq $frameworks -or $frameworks.Count -eq 0)) {
+            $testProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -match '\\.Tests\\.csproj$' }
+            $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($proj in $testProjects) {
+              try {
+                [xml]$xml = Get-Content -LiteralPath $proj.FullName
+                $tfs = @();
+                $tfs += ($xml.Project.PropertyGroup.TargetFrameworks | ForEach-Object { $_.InnerText })
+                $tfs += ($xml.Project.PropertyGroup.TargetFramework  | ForEach-Object { $_.InnerText })
+                foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) {
+                  [void]$set.Add($tf)
+                }
+              } catch { }
+            }
+            $frameworks = @($set)
+            # Filter out net4x on non-Windows
+            if ($env:RUNNER_OS -ne 'Windows') {
+              $frameworks = @($frameworks | Where-Object { $_ -notmatch '^net4' })
+            }
+            if ($frameworks.Count -eq 0) { $frameworks = @('') } # empty means no -f
+          }
+          $fwOut = ($frameworks | ConvertTo-Json -Compress)
+          "frameworks=$fwOut" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          # sdks
+          $sdks = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+          $autoSdks = [System.Convert]::ToBoolean('${{ inputs.auto_detect_sdks }}')
+          if ($autoSdks) {
+            $globals = Get-ChildItem -Recurse -Path . -Filter global.json -File -ErrorAction SilentlyContinue
+            foreach ($g in $globals) {
+              try {
+                $gj = Get-Content -Raw -LiteralPath $g.FullName | ConvertFrom-Json
+                $ver = $gj.sdk.version
+                if ($ver -match '^(\d+)\.(\d+)\.') { [void]$sdks.Add("$($Matches[1]).$($Matches[2]).x") }
+              } catch { }
+            }
+            foreach ($fw in $frameworks) {
+              if ($fw -match '^net(\d+)\.(\d+)$') { [void]$sdks.Add("$($Matches[1]).$($Matches[2]).x") }
+            }
+          }
+          if ($sdks.Count -eq 0) {
+            try {
+              $inp = [Text.Json.JsonSerializer]::Deserialize('${{ inputs.dotnet_versions }}',[object])
+              foreach ($i in $inp) { if ($i) { [void]$sdks.Add([string]$i) } }
+            } catch { }
+          }
+          if ($sdks.Count -eq 0) { [void]$sdks.Add('8.0.x') }
+          $sdkOut = ($sdks | ConvertTo-Json -Compress)
+          "sdks=$sdkOut" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
   test:
     name: dotnet on ${{ matrix.os }} (SDK ${{ matrix.sdk }})
+    needs: [detect]
     runs-on: ${{ fromJSON(matrix.os) }}
+    concurrency:
+      group: ${{ github.workflow }}-dotnet-${{ matrix.os }}-${{ matrix.sdk }}-${{ github.event.pull_request.head.sha || github.sha }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
         os: [ '${{ inputs.os }}' ]
-        sdk: ${{ fromJSON(inputs.dotnet_versions) }}
+        sdk: ${{ fromJSON(needs.detect.outputs.sdks) }}
+        framework: ${{ fromJSON(needs.detect.outputs.frameworks) }}
       max-parallel: 8
 
     steps:
@@ -113,11 +203,15 @@ jobs:
           $frameworks = @(); try { $frameworks = [Text.Json.JsonSerializer]::Deserialize('${{ inputs.frameworks }}',[object]) } catch { }
           function Run-Test($fw) {
             $fwArg = if ($fw) { "--framework $fw" } else { '' }
-            dotnet test $sln --configuration $cfg --no-build --verbosity $verbosity --logger "console;verbosity=$verbosity" --logger trx --collect:"XPlat Code Coverage" $fwArg
+            $logName = if ($fw) { "results-$fw.trx" } else { "results.trx" }
+            dotnet test $sln --configuration $cfg --no-build --verbosity $verbosity --logger "console;verbosity=$verbosity" --logger "trx;LogFileName=$logName" --results-directory "artifacts/TestResults" --collect:"XPlat Code Coverage" $fwArg
             return $LASTEXITCODE
           }
           $overall = 0
-          if ($frameworks.Count -gt 0) {
+          $matrixFw = '${{ matrix.framework }}'
+          if ($matrixFw) {
+            $overall = Run-Test $matrixFw
+          } elseif ($frameworks.Count -gt 0) {
             foreach ($fw in $frameworks) {
               $code = Run-Test $fw
               if ($code -ne 0) { $overall = $code }
@@ -136,14 +230,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trx-${{ runner.os }}-${{ matrix.sdk }}
-          path: '**/*.trx'
+          name: trx-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework || 'all' }}
+          path: 'artifacts/TestResults/*.trx'
 
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ runner.os }}-${{ matrix.sdk }}
+          name: coverage-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework || 'all' }}
           path: '**/coverage.cobertura.xml'
 
       - name: Upload to Codecov
@@ -152,4 +246,3 @@ jobs:
         with:
           files: '**/coverage.cobertura.xml'
           token: ${{ inputs.codecov_token || secrets.CODECOV_TOKEN }}
-

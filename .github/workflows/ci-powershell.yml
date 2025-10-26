@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      rebuild_psd1:
+        description: "Refresh module manifest before tests"
+        required: false
+        default: false
+        type: boolean
       solution:
         description: "Optional .sln to build before tests"
         required: false
@@ -51,26 +56,21 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: true
-
 jobs:
   refresh-psd1:
+    if: ${{ inputs.rebuild_psd1 }}
     name: Refresh PSD1
     runs-on: ${{ fromJSON(inputs.runs_on) }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Refresh PSD1
         uses: ./.github/actions/ps-refresh-psd1
         with:
           build_script: ${{ inputs.build_script }}
           manifest_path: ${{ inputs.module_manifest }}
           commit_changes: ${{ inputs.commit_psd1 }}
-
       - name: Upload refreshed manifest
         uses: actions/upload-artifact@v4
         with:
@@ -79,8 +79,10 @@ jobs:
 
   test:
     name: PowerShell ${{ matrix.psver }}
-    needs: refresh-psd1
     runs-on: ${{ fromJSON(inputs.runs_on) }}
+    concurrency:
+      group: ${{ github.workflow }}-pester-${{ matrix.psver }}-${{ github.event.pull_request.head.sha || github.sha }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
@@ -91,6 +93,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download manifest
+        if: ${{ inputs.rebuild_psd1 }}
         uses: actions/download-artifact@v4
         with:
           name: psd1
@@ -170,4 +173,3 @@ jobs:
         with:
           name: test-results-ps${{ matrix.psver }}
           path: Module/TestResults.xml
-

@@ -10,9 +10,9 @@ Goal
 What’s included
 ---------------
 - Reusable workflows (call via `uses:`):
-  - `.github/workflows/unified-ci.yml` – one-switch CI for .NET + PowerShell + Claude.
-  - `.github/workflows/ci-dotnet.yml` – build/test/coverage for .NET.
-  - `.github/workflows/ci-powershell.yml` – refresh PSD1 and run Pester (5.1/7).
+  - `.github/workflows/unified-ci.yml` – one-switch CI for .NET + PowerShell + Claude (all-in-one; shows skipped jobs too).
+  - `.github/workflows/ci-dotnet.yml` – .NET-only build/test/coverage. Auto-detects TFMs/SDKs.
+  - `.github/workflows/ci-powershell.yml` – PowerShell-only Pester (5.1/7), optional PSD1 refresh.
   - `.github/workflows/release-dotnet.yml` – pack and push NuGet packages.
   - `.github/workflows/release-powershell.yml` – publish module to PowerShell Gallery.
   - `.github/workflows/review-claude.yml` – PR code review with Claude.
@@ -70,13 +70,16 @@ Key inputs (high level)
     - `summary_issue_title`, `summary_issue_label` – when destination is 'issue'.
 
 - .NET CI (`.github/workflows/ci-dotnet.yml`):
-  - `solution` (default `**/*.sln`), `dotnet_versions` JSON (e.g. `["8.0.x"]`), `os` JSON (e.g. `["windows-latest"]`).
-  - `frameworks` JSON to test specific TFMs (empty = test all in solution).
+  - `solution` (default `**/*.sln`), `os` JSON (e.g. `["windows-latest"]`).
+  - `auto_detect_frameworks` (default true) – scans `*.Tests.csproj` for TFMs and runs per-TFM.
+  - `auto_detect_sdks` (default true) – collects SDKs from `global.json` and TFMs (e.g., net9.0 → 9.0.x).
+  - `frameworks` and `dotnet_versions` still accepted; providing them disables auto-detect for that dimension.
   - `summarize_failures` true/false – prints only failed tests on failure.
   - `enable_codecov` true/false and `codecov_token`/`secrets.CODECOV_TOKEN` if needed.
 
 - PowerShell CI (`.github/workflows/ci-powershell.yml`):
   - `module_manifest` and `build_script` (defaults to `Module/Build/Build-Module.ps1`).
+  - `rebuild_psd1` true/false – refresh manifest before tests (default false).
   - `commit_psd1` true/false – commit refreshed manifest (safe for pushes and same-repo PRs).
   - `ps_versions` JSON (e.g. `["5.1","7"]`) and `runs_on` JSON (e.g. `["windows-latest"]`).
   - Optional `solution` to build .NET bits before tests, and optional `test_script` to run custom tests.
