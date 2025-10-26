@@ -94,6 +94,7 @@ jobs:
     uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
       os: '["windows-latest"]'
+      os_label: 'Windows'
       solution: ${{ inputs.solution }}
       frameworks: ${{ inputs.dotnet_frameworks }}
       summarize_failures: true
@@ -106,6 +107,7 @@ jobs:
     uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
       os: '["ubuntu-latest"]'
+      os_label: 'Ubuntu'
       solution: ${{ inputs.solution }}
       frameworks: ${{ inputs.dotnet_frameworks }}
       summarize_failures: true
@@ -118,6 +120,7 @@ jobs:
     uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
       os: '["macos-latest"]'
+      os_label: 'macOS'
       solution: ${{ inputs.solution }}
       frameworks: ${{ inputs.dotnet_frameworks }}
       summarize_failures: true

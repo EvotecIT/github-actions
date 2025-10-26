@@ -3,6 +3,11 @@ name: Evotec .NET CI
 on:
   workflow_call:
     inputs:
+      os_label:
+        description: 'Human-friendly OS label for job name (e.g. Windows, Ubuntu, macOS)'
+        required: false
+        default: ''
+        type: string
       solution:
         description: "Path to .sln (or directory to search)"
         required: false
@@ -67,8 +72,9 @@ on:
         required: false
 
 jobs:
-  test:
-    name: dotnet (SDK ${{ matrix.sdk }} | auto TFMs)
+  test-auto:
+    if: ${{ inputs.frameworks == '' || inputs.frameworks == '[]' }}
+    name: dotnet (${{ inputs.os_label }} | auto TFMs | SDK ${{ matrix.sdk }})
     runs-on: ${{ fromJSON(inputs.os) }}
     strategy:
       fail-fast: false
@@ -133,4 +139,74 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: counts-${{ runner.os }}-${{ matrix.sdk }}
+          path: artifacts/Counts/*.json
+
+  test-matrix:
+    if: ${{ inputs.frameworks != '' && inputs.frameworks != '[]' }}
+    name: dotnet (${{ inputs.os_label }} | ${{ matrix.framework }} | SDK ${{ matrix.sdk }})
+    runs-on: ${{ fromJSON(inputs.os) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ${{ fromJSON(inputs.dotnet_versions) }}
+        framework: ${{ fromJSON(inputs.frameworks) }}
+      max-parallel: 8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show SDK/TFM
+        shell: pwsh
+        run: |
+          Write-Host "SDK: ${{ matrix.sdk }}"
+          Write-Host "TFM: ${{ matrix.framework }}"
+          "SDK: ${{ matrix.sdk }}`nTFM: ${{ matrix.framework }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Run .NET tests (single TFM)
+        id: run
+        uses: evotecit/github-actions/.github/actions/dotnet-run-tests@master
+        with:
+          solution: ${{ inputs.solution }}
+          sdk: ${{ matrix.sdk }}
+          build_configuration: ${{ inputs.build_configuration }}
+          test_verbosity: ${{ inputs.test_verbosity }}
+          frameworks: ${{ toJSON(matrix.framework) }}
+          restore_build_first: ${{ inputs.restore_build_first }}
+          enable_coverage: true
+        timeout-minutes: 30
+
+      - name: Summarize failing tests
+        if: failure() && inputs.summarize_failures
+        uses: evotecit/github-actions/.github/actions/dotnet-test-summary@master
+
+      - name: Upload TRX
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trx-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework }}
+          path: artifacts/TestResults/**/*.trx
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework }}
+          path: '**/coverage.cobertura.xml'
+
+      - name: Upload to Codecov
+        if: inputs.enable_codecov && hashFiles('**/coverage.cobertura.xml') != ''
+        uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          files: '**/coverage.cobertura.xml'
+          token: ${{ inputs.codecov_token }}
+          fail_ci_if_error: false
+
+      - name: Upload test counts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: counts-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework }}
           path: artifacts/Counts/*.json
