@@ -197,6 +197,50 @@ jobs:
           name: test-results-ps${{ matrix.psver }}
           path: Module/TestResults.xml
 
+      - name: Emit test counts JSON
+        if: always() && steps.tests.outputs.has_tests == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $total = 0; $failed = 0; $passed = 0; $skipped = 0
+          if (Test-Path 'Module/TestResults.xml') {
+            [xml]$xml = Get-Content -LiteralPath 'Module/TestResults.xml'
+            $cases = @($xml.SelectNodes('//test-case'))
+            foreach ($c in $cases) {
+              $total++
+              $res = ($c.result + '')
+              switch ($res) {
+                'Passed' { $passed++ }
+                'Failure' { $failed++ }
+                'Error' { $failed++ }
+                'Skipped' { $skipped++ }
+                'Ignored' { $skipped++ }
+                'Inconclusive' { $skipped++ }
+                default { $skipped++ }
+              }
+            }
+          }
+          $obj = [ordered]@{
+            kind   = 'pester'
+            os     = 'Windows'
+            ps     = "${{ matrix.psver }}"
+            total  = $total
+            passed = $passed
+            failed = $failed
+            skipped= $skipped
+          }
+          $outDir = Join-Path $PWD 'artifacts/Counts'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $jsonPath = Join-Path $outDir ("pester-${{ matrix.psver }}.json")
+          ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
+
+      - name: Upload test counts
+        if: always() && steps.tests.outputs.has_tests == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: counts-pester-${{ matrix.psver }}
+          path: artifacts/Counts/*.json
+
       - name: No tests found policy
         if: ${{ steps.tests.outputs.has_tests == 'false' }}
         shell: pwsh

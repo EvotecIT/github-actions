@@ -246,3 +246,51 @@ jobs:
         with:
           files: '**/coverage.cobertura.xml'
           token: ${{ inputs.codecov_token || secrets.CODECOV_TOKEN }}
+
+      - name: Emit test counts JSON
+        if: always()
+        id: counts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $PWD 'artifacts/TestResults'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $all = Get-ChildItem -Path $dir -Filter *.trx -ErrorAction SilentlyContinue
+          $total = 0; $failed = 0; $passed = 0; $skipped = 0
+          foreach ($trx in $all) {
+            try {
+              $nodes = Select-Xml -Path $trx.FullName -XPath "//UnitTestResult"
+              foreach ($n in $nodes) {
+                $total++
+                switch ($n.Node.outcome) {
+                  'Passed' { $passed++ }
+                  'Failed' { $failed++ }
+                  'Error'  { $failed++ }
+                  'Timeout' { $failed++ }
+                  'Aborted' { $failed++ }
+                  default { $skipped++ }
+                }
+              }
+            } catch { }
+          }
+          $obj = [ordered]@{
+            kind      = 'dotnet'
+            os        = "$env:RUNNER_OS"
+            sdk       = "${{ matrix.sdk }}"
+            framework = "${{ matrix.framework || 'all' }}"
+            total     = $total
+            passed    = $passed
+            failed    = $failed
+            skipped   = $skipped
+          }
+          $outDir = Join-Path $PWD 'artifacts/Counts'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $jsonPath = Join-Path $outDir ("dotnet-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework || 'all' }}.json")
+          ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
+
+      - name: Upload test counts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: counts-${{ runner.os }}-${{ matrix.sdk }}-${{ matrix.framework || 'all' }}
+          path: artifacts/Counts/*.json
