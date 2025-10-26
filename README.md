@@ -13,7 +13,7 @@ What’s included
   - `.github/workflows/unified-ci.yml` – one-switch CI for .NET + PowerShell + Claude (all-in-one; shows skipped jobs too).
   - `.github/workflows/ci-dotnet.yml` – .NET-only build/test/coverage. Auto-detects TFMs/SDKs.
   - `.github/workflows/ci-powershell.yml` – PowerShell-only Pester (5.1/7), optional PSD1 refresh.
-  - `.github/workflows/ci-orchestrator.yml` – single entry that fans out to `.NET`, `PowerShell`, Claude, and consolidated PR comment.
+- `.github/workflows/ci-orchestrator.yml` – single entry that fans out to `.NET`, `PowerShell`, Claude, and consolidated PR comment.
   - `.github/workflows/release-dotnet.yml` – pack and push NuGet packages.
   - `.github/workflows/release-powershell.yml` – publish module to PowerShell Gallery.
   - `.github/workflows/review-claude.yml` – PR code review with Claude.
@@ -136,6 +136,7 @@ Orchestrator inputs (ci-orchestrator.yml)
 - `.NET`:
   - `os_dotnet` – JSON of runners, default `["windows-latest","ubuntu-latest","macos-latest"]`.
   - `dotnet_frameworks` – JSON of TFMs to test; empty means auto-detect from `*.Tests.csproj`.
+  - `dotnet_build_configuration` – build config passed to tests, default `Release`.
   - `enable_codecov` – upload coverage to Codecov (tokenless on public repos).
 - `PowerShell`:
   - `ps_run` – whether to run Pester jobs (default true).
@@ -144,7 +145,7 @@ Orchestrator inputs (ci-orchestrator.yml)
   - `ps_module_manifest` – path to `.psd1`.
   - `ps_test_script` – custom test script; otherwise, looks under `ps_tests_path`.
   - `ps_tests_path` – folder with `*.Tests.ps1`, default `Module/Tests`.
-  - `ps_empty_tests_behavior` – `skip` | `warn` | `fail` when no tests.
+  - `ps_empty_tests_behavior` – `skip` | `warn` | `fail` when no tests (default `fail`).
 - `Claude`:
   - `claude_review` – run Claude PR review (requires `CLAUDE_CODE_OAUTH_TOKEN`).
   - `claude_runs_on` – JSON runner labels for Claude job.

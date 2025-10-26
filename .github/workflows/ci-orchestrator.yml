@@ -25,6 +25,11 @@ on:
         required: false
         default: true
         type: boolean
+      dotnet_build_configuration:
+        description: 'Build configuration for .NET jobs'
+        required: false
+        default: 'Release'
+        type: string
       # PowerShell
       ps_run:
         description: 'Run PowerShell Pester tests'
@@ -59,7 +64,7 @@ on:
       ps_empty_tests_behavior:
         description: "Behavior when no Pester tests found: 'skip' | 'warn' | 'fail'"
         required: false
-        default: 'skip'
+        default: 'fail'
         type: string
       # Claude
       claude_review:
@@ -93,6 +98,7 @@ jobs:
       frameworks: ${{ inputs.dotnet_frameworks }}
       summarize_failures: true
       enable_codecov: ${{ inputs.enable_codecov }}
+      build_configuration: ${{ inputs.dotnet_build_configuration }}
     secrets: inherit
 
   dotnet-ubuntu:
@@ -104,6 +110,7 @@ jobs:
       frameworks: ${{ inputs.dotnet_frameworks }}
       summarize_failures: true
       enable_codecov: ${{ inputs.enable_codecov }}
+      build_configuration: ${{ inputs.dotnet_build_configuration }}
     secrets: inherit
 
   dotnet-macos:
@@ -115,6 +122,7 @@ jobs:
       frameworks: ${{ inputs.dotnet_frameworks }}
       summarize_failures: true
       enable_codecov: ${{ inputs.enable_codecov }}
+      build_configuration: ${{ inputs.dotnet_build_configuration }}
     secrets: inherit
 
   pester-windows:
