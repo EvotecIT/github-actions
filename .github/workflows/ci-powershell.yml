@@ -91,6 +91,19 @@ jobs:
           manifest_path: ${{ inputs.module_manifest }}
           commit_changes: ${{ inputs.commit_psd1 }}
 
+      - name: Run Pester (composite)
+        id: run
+        uses: evotecit/github-actions/.github/actions/pester-runner@master
+        with:
+          psver: ${{ matrix.psver }}
+          tests_path: ${{ inputs.tests_path }}
+          test_script: ${{ inputs.test_script }}
+          results_file: 'Module/TestResults.xml'
+          empty_tests_behavior: ${{ inputs.empty_tests_behavior }}
+          solution: ${{ inputs.solution }}
+          dotnet_version: ${{ inputs.dotnet_version }}
+        timeout-minutes: 30
+
       - name: Detect test files
         id: tests
         shell: pwsh
@@ -105,13 +118,13 @@ jobs:
           "has_tests=$([string]([bool]($count -gt 0)))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Setup .NET (optional)
-        if: ${{ inputs.solution != '' }}
+        if: ${{ false }}
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ inputs.dotnet_version }}
 
       - name: Install test dependencies (PowerShell 5.1)
-        if: ${{ matrix.psver == '5.1' }}
+        if: ${{ false }}
         shell: powershell
         run: |
           Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
@@ -119,7 +132,7 @@ jobs:
           Install-Module PSWriteColor -Force -SkipPublisherCheck -AllowClobber
 
       - name: Install test dependencies (PowerShell 7)
-        if: ${{ matrix.psver != '5.1' }}
+        if: ${{ false }}
         shell: pwsh
         run: |
           Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
@@ -127,13 +140,13 @@ jobs:
           Install-Module PSWriteColor -Force -SkipPublisherCheck -AllowClobber
 
       - name: Build .NET solution
-        if: ${{ inputs.solution != '' }}
+        if: ${{ false }}
         run: |
           dotnet restore "${{ inputs.solution }}"
           dotnet build   "${{ inputs.solution }}" --configuration Debug --no-restore
 
       - name: Run tests (PowerShell 5.1)
-        if: ${{ matrix.psver == '5.1' && steps.tests.outputs.has_tests == 'true' }}
+        if: ${{ false }}
         shell: powershell
         run: |
           if ('${{ inputs.test_script }}') {
@@ -150,7 +163,7 @@ jobs:
         timeout-minutes: 30
 
       - name: Run tests (PowerShell 7)
-        if: ${{ matrix.psver != '5.1' && steps.tests.outputs.has_tests == 'true' }}
+        if: ${{ false }}
         shell: pwsh
         run: |
           if ('${{ inputs.test_script }}') {
@@ -167,98 +180,27 @@ jobs:
         timeout-minutes: 30
 
       - name: Summarize failing tests
-        if: failure() && inputs.summarize_failures && steps.tests.outputs.has_tests == 'true'
+        if: failure() && inputs.summarize_failures && steps.run.outputs.has_tests == 'true'
         uses: evotecit/github-actions/.github/actions/pester-summary@master
         with:
           results_file: Module/TestResults.xml
 
       - name: Upload test results
-        if: always() && steps.tests.outputs.has_tests == 'true'
+        if: always() && steps.run.outputs.has_tests == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: test-results-ps${{ matrix.psver }}
           path: Module/TestResults.xml
 
-      - name: Emit test counts JSON
-        if: always() && steps.tests.outputs.has_tests == 'true'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $total = 0; $failed = 0; $passed = 0; $skipped = 0
-          if (Test-Path 'Module/TestResults.xml') {
-            [xml]$xml = Get-Content -LiteralPath 'Module/TestResults.xml'
-            $cases = @($xml.SelectNodes('//test-case'))
-            foreach ($c in $cases) {
-              $total++
-              $res = ($c.result + '')
-              switch ($res) {
-                'Passed' { $passed++ }
-                'Failure' { $failed++ }
-                'Error' { $failed++ }
-                'Skipped' { $skipped++ }
-                'Ignored' { $skipped++ }
-                'Inconclusive' { $skipped++ }
-                default { $skipped++ }
-              }
-            }
-          }
-          $obj = [ordered]@{
-            kind   = 'pester'
-            os     = 'Windows'
-            ps     = "${{ matrix.psver }}"
-            total  = $total
-            passed = $passed
-            failed = $failed
-            skipped= $skipped
-          }
-          $outDir = Join-Path $PWD 'artifacts/Counts'
-          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-          $jsonPath = Join-Path $outDir ("pester-${{ matrix.psver }}.json")
-          ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
-
       - name: Upload test counts
-        if: always() && steps.tests.outputs.has_tests == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: counts-pester-${{ matrix.psver }}
-          path: artifacts/Counts/*.json
+          path: ${{ steps.run.outputs.counts_glob }}
 
       - name: Emit empty counts when no tests
-        if: ${{ steps.tests.outputs.has_tests == 'false' }}
+        if: ${{ false }}
         shell: pwsh
         run: |
-          $obj = [ordered]@{
-            kind   = 'pester'
-            os     = 'Windows'
-            ps     = "${{ matrix.psver }}"
-            total  = 0
-            passed = 0
-            failed = 0
-            skipped= 0
-            note   = "No Pester test files found under '${{ inputs.tests_path }}' (treated as '${{ inputs.empty_tests_behavior }}')."
-          }
-          $outDir = Join-Path $PWD 'artifacts/Counts'
-          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-          $jsonPath = Join-Path $outDir ("pester-${{ matrix.psver }}.json")
-          ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
-      
-      - name: Upload empty counts
-        if: ${{ steps.tests.outputs.has_tests == 'false' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: counts-pester-${{ matrix.psver }}
-          path: artifacts/Counts/*.json
-
-      - name: No tests found policy
-        if: ${{ steps.tests.outputs.has_tests == 'false' }}
-        shell: pwsh
-        env:
-          EMPTY_BEHAVIOR: ${{ inputs.empty_tests_behavior }}
-          SUMMARY_PATH: ${{ env.GITHUB_STEP_SUMMARY }}
-        run: |
-          $msg = "No Pester test files found under '${{ inputs.tests_path }}'."
-          switch (($env:EMPTY_BEHAVIOR ?? 'skip').ToLowerInvariant()) {
-            'fail' { Write-Error $msg; if ($env:SUMMARY_PATH) { "### PowerShell (Pester)`n- ❌ $msg`n" | Out-File -FilePath $env:SUMMARY_PATH -Append -Encoding utf8 }; exit 1 }
-            'warn' { Write-Warning $msg; if ($env:SUMMARY_PATH) { "### PowerShell (Pester)`n- ⚠️ $msg`n" | Out-File -FilePath $env:SUMMARY_PATH -Append -Encoding utf8 } }
-            Default { Write-Host $msg; if ($env:SUMMARY_PATH) { "### PowerShell (Pester)`n- ℹ️ $msg`n" | Out-File -FilePath $env:SUMMARY_PATH -Append -Encoding utf8 } }
-          }
+          Write-Host 'Replaced by pester-runner'
