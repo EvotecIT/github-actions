@@ -1,0 +1,312 @@
+name: Evotec CI Orchestrator
+
+on:
+  workflow_call:
+    inputs:
+      # Project
+      solution:
+        description: 'Path or glob to .sln'
+        required: false
+        default: '**/*.sln'
+        type: string
+      # .NET
+      os_dotnet:
+        description: 'JSON array of OS runners for .NET (e.g. ["windows-latest","ubuntu-latest","macos-latest"])'
+        required: false
+        default: '["windows-latest","ubuntu-latest","macos-latest"]'
+        type: string
+      enable_codecov:
+        description: 'Upload coverage to Codecov in .NET jobs'
+        required: false
+        default: true
+        type: boolean
+      # PowerShell
+      run_pester:
+        description: 'Run PowerShell Pester tests'
+        required: false
+        default: true
+        type: boolean
+      ps_versions:
+        description: 'JSON array of PowerShell versions to test'
+        required: false
+        default: '["5.1","7"]'
+        type: string
+      module_manifest:
+        description: 'Path to module .psd1'
+        required: false
+        default: ''
+        type: string
+      test_script:
+        description: 'Optional custom Pester test script'
+        required: false
+        default: ''
+        type: string
+      tests_path:
+        description: 'Folder to search for *.Tests.ps1'
+        required: false
+        default: 'Module/Tests'
+        type: string
+      empty_tests_behavior:
+        description: "Behavior when no Pester tests found: 'skip' | 'warn' | 'fail'"
+        required: false
+        default: 'skip'
+        type: string
+      # Claude
+      claude_review:
+        description: 'Run Claude code review on PRs'
+        required: false
+        default: false
+        type: boolean
+      claude_runs_on:
+        description: 'JSON array of runners for Claude review'
+        required: false
+        default: '["ubuntu-latest"]'
+        type: string
+      post_pr_comment:
+        description: 'Always post consolidated PR comment'
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+
+jobs:
+  dotnet-windows:
+    if: contains(fromJSON(inputs.os_dotnet), 'windows-latest')
+    uses: ./.github/workflows/ci-dotnet.yml
+    with:
+      os: '["windows-latest"]'
+      solution: ${{ inputs.solution }}
+      summarize_failures: true
+      enable_codecov: ${{ inputs.enable_codecov }}
+    secrets: inherit
+
+  dotnet-ubuntu:
+    if: contains(fromJSON(inputs.os_dotnet), 'ubuntu-latest')
+    uses: ./.github/workflows/ci-dotnet.yml
+    with:
+      os: '["ubuntu-latest"]'
+      solution: ${{ inputs.solution }}
+      summarize_failures: true
+      enable_codecov: ${{ inputs.enable_codecov }}
+    secrets: inherit
+
+  dotnet-macos:
+    if: contains(fromJSON(inputs.os_dotnet), 'macos-latest')
+    uses: ./.github/workflows/ci-dotnet.yml
+    with:
+      os: '["macos-latest"]'
+      solution: ${{ inputs.solution }}
+      summarize_failures: true
+      enable_codecov: ${{ inputs.enable_codecov }}
+    secrets: inherit
+
+  pester-windows:
+    if: ${{ inputs.run_pester }}
+    uses: ./.github/workflows/ci-powershell.yml
+    with:
+      runs_on: '["windows-latest"]'
+      module_manifest: ${{ inputs.module_manifest }}
+      solution: ${{ inputs.solution }}
+      ps_versions: ${{ inputs.ps_versions }}
+      test_script: ${{ inputs.test_script }}
+      tests_path: ${{ inputs.tests_path }}
+      empty_tests_behavior: ${{ inputs.empty_tests_behavior }}
+      summarize_failures: true
+      dotnet_version: '8.0.x'
+    secrets: inherit
+
+  claude-review:
+    if: ${{ inputs.claude_review && github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/review-claude.yml
+    with:
+      runs_on: ${{ inputs.claude_runs_on }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  summary:
+    name: Consolidated Test Summary
+    needs: [dotnet-windows, dotnet-ubuntu, dotnet-macos, pester-windows]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Download TRX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: trx-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Download Pester results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-results-ps*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Download count summaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: counts-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Aggregate failing tests
+        id: aggregate
+        shell: pwsh
+        env:
+          RES_DOTNET_WINDOWS: ${{ needs.dotnet-windows.result }}
+          RES_DOTNET_UBUNTU:  ${{ needs.dotnet-ubuntu.result }}
+          RES_DOTNET_MACOS:   ${{ needs.dotnet-macos.result }}
+          RES_PESTER_WINDOWS: ${{ needs.pester-windows.result }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $PWD 'artifacts'
+          if (-not (Test-Path $root)) { New-Item -ItemType Directory -Force -Path $root | Out-Null }
+
+          $md = ""
+          $failed = 0
+          $jobIssues = @()
+          $totalAll = 0; $failedAll = 0; $passedAll = 0; $skippedAll = 0
+
+          # Job results (failure/cancelled)
+          $results = @{
+            '.NET (Windows)' = $env:RES_DOTNET_WINDOWS
+            '.NET (Ubuntu)'  = $env:RES_DOTNET_UBUNTU
+            '.NET (macOS)'   = $env:RES_DOTNET_MACOS
+            'PowerShell (Windows)' = $env:RES_PESTER_WINDOWS
+          }
+          foreach ($k in $results.Keys) {
+            $v = ($results[$k] ?? '').ToLowerInvariant()
+            if ($v -in @('failure','cancelled')) { $jobIssues += "- ❌ $k: $v" }
+          }
+
+          # .NET TRX parsing
+          $trxFiles = Get-ChildItem -Recurse -Path $root -Filter *.trx -ErrorAction SilentlyContinue
+          if ($trxFiles) {
+            $md += "### .NET`n"
+            $netTotal = 0; $netFailed = 0; $netPassed = 0; $netSkipped = 0
+            foreach ($trx in $trxFiles) {
+              try {
+                $all = Select-Xml -Path $trx.FullName -XPath "//UnitTestResult"
+                $nodes = @($all | Where-Object { $_.Node.outcome -in @('Failed','Error','Timeout','Aborted') })
+                $passed = @($all | Where-Object { $_.Node.outcome -eq 'Passed' })
+                $skipped = @($all | Where-Object { $_.Node.outcome -in @('NotExecuted','Inconclusive','Skipped','Warning') })
+                $netTotal += $all.Count; $netFailed += $nodes.Count; $netPassed += $passed.Count; $netSkipped += $skipped.Count
+                $groupTitle = [System.IO.Path]::GetFileNameWithoutExtension($trx.Name)
+                $printed = $false
+                foreach ($n in $nodes) {
+                  if (-not $printed) { $md += "#### $groupTitle`n"; $printed = $true }
+                  $name = $n.Node.testName
+                  $msg  = $n.Node.Output.ErrorInfo.Message
+                  $md += "- ❌ $name`n"
+                  if ($msg) { $md += "  - $msg`n" }
+                  $failed++
+                }
+              } catch { }
+            }
+            $totalAll += $netTotal; $failedAll += $netFailed; $passedAll += $netPassed; $skippedAll += $netSkipped
+          } else {
+            $md += "### .NET`n- ℹ️ No .NET test results found`n"
+          }
+
+          # Pester NUnit XML parsing
+          $nunitFiles = Get-ChildItem -Recurse -Path $root -Filter TestResults.xml -ErrorAction SilentlyContinue
+          if ($nunitFiles) {
+            $md += "### PowerShell (Pester)`n"
+            $psTotal = 0; $psFailed = 0; $psPassed = 0; $psSkipped = 0
+            foreach ($xmlPath in $nunitFiles) {
+              try {
+                [xml]$xml = Get-Content -LiteralPath $xmlPath.FullName
+                $cases = @($xml.SelectNodes('//test-case'))
+                $groupTitle = Split-Path -Leaf -Path (Split-Path -Parent -Path $xmlPath.FullName)
+                $printed = $false
+                foreach ($c in $cases) { $psTotal++ }
+                foreach ($c in $cases) {
+                  $result = ($c.result + '')
+                  if ($result -in @('Failure','Error')) {
+                    if (-not $printed) { $md += "#### $groupTitle`n"; $printed = $true }
+                    $name = $c.name
+                    $msg = $c.failure.message.'#text'
+                    $md += "- ❌ $name`n"
+                    if ($msg) { $md += "  - $msg`n" }
+                    $failed++; $psFailed++
+                  } elseif ($result -eq 'Passed') {
+                    $psPassed++
+                  } elseif ($result -in @('Skipped','Ignored','Inconclusive')) {
+                    $psSkipped++
+                  }
+                }
+              } catch { }
+            }
+            $totalAll += $psTotal; $failedAll += $psFailed; $passedAll += $psPassed; $skippedAll += $psSkipped
+          } else {
+            $md += "### PowerShell (Pester)`n- ℹ️ No Pester test results found`n"
+          }
+
+          if ($jobIssues.Count -gt 0) {
+            $md = "## CI Status`n" + ($jobIssues -join "`n") + "`n`n" + $md
+            $failed++
+          }
+
+          $header = "## CI Failing Tests Summary";
+          if ($totalAll -gt 0) {
+            $header += (" — {0} failed, {1} passed, {2} skipped ({3} total)" -f $failedAll, $passedAll, $skippedAll, $totalAll)
+          }
+          # Per-matrix totals table from counts JSON (if present)
+          $countFiles = Get-ChildItem -Recurse -Path $root -Filter *.json -ErrorAction SilentlyContinue
+          $rows = @()
+          foreach ($cf in $countFiles) {
+            try {
+              $j = Get-Content -Raw -LiteralPath $cf.FullName | ConvertFrom-Json
+              if ($j.kind -eq 'dotnet') {
+                $rows += [pscustomobject]@{ Job = '.NET'; Matrix = "${j.os} | SDK ${j.sdk} | ${j.framework}"; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
+              } elseif ($j.kind -eq 'pester') {
+                $rows += [pscustomobject]@{ Job = 'PowerShell'; Matrix = "Windows | PS ${j.ps}"; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
+              }
+            } catch { }
+          }
+          if ($rows.Count -gt 0) {
+            $mdTable = "| Job | Matrix | Passed | Failed | Skipped | Total |`n|---|---|---:|---:|---:|---:|`n"
+            foreach ($r in $rows) { $mdTable += ("| {0} | {1} | {2} | {3} | {4} | {5} |`n" -f $r.Job, $r.Matrix, $r.Passed, $r.Failed, $r.Skipped, $r.Total) }
+            $md = $header + "`n`n" + $mdTable + "`n" + $md
+          } else {
+            $md = $header + "`n`n" + $md
+          }
+          if ($failed -eq 0) { $md += "All tests passed ✅`n" }
+
+          if ($env:GITHUB_STEP_SUMMARY) { $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
+          "markdown<<EOF`n$md`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "hasfailures=$([string]([bool]($failed -gt 0)))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Post consolidated PR comment
+        if: ${{ inputs.post_pr_comment && github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        env:
+          SUMMARY_MARKER: evotec-ci-aggregate-summary
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.payload.pull_request.number;
+            const marker = `<!-- ${process.env.SUMMARY_MARKER} -->`;
+            let md = `${{ toJSON(steps.aggregate.outputs.markdown) }}`;
+            const run_id = context.runId;
+            md += `\n\n### Artifacts\n- [View all artifacts for this run](https://github.com/${owner}/${repo}/actions/runs/${run_id})\n`;
+            const sticky = true;
+            const comments = await github.paginate(github.rest.issues.listComments, {owner, repo, issue_number, per_page: 100});
+            const found = comments.find(c => typeof c.body === 'string' && c.body.includes(marker));
+            const body = `${marker}\n${md}`;
+            if (found && sticky) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: found.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
