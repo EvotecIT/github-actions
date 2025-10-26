@@ -134,7 +134,7 @@ jobs:
 
   claude-review:
     if: ${{ inputs.claude_review && github.event_name == 'pull_request' }}
-    uses: ./.github/workflows/review-claude.yml
+    uses: EvotecIT/github-actions/.github/workflows/review-claude.yml@master
     with:
       runs_on: ${{ inputs.claude_runs_on }}
     secrets:
@@ -304,13 +304,14 @@ jobs:
         uses: actions/github-script@v7
         env:
           SUMMARY_MARKER: evotec-ci-aggregate-summary
+          BODY: ${{ steps.aggregate.outputs.markdown }}
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const issue_number = context.payload.pull_request.number;
             const marker = `<!-- ${process.env.SUMMARY_MARKER} -->`;
-            let md = `${{ toJSON(steps.aggregate.outputs.markdown) }}`;
+            let md = process.env.BODY || '';
             const run_id = context.runId;
             md += `\n\n### Artifacts\n- [View all artifacts for this run](https://github.com/${owner}/${repo}/actions/runs/${run_id})\n`;
             const sticky = true;

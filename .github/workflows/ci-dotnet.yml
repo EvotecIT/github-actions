@@ -95,7 +95,7 @@ jobs:
           $fwJson = '${{ inputs.frameworks }}'
           $autoFw = [System.Convert]::ToBoolean('${{ inputs.auto_detect_frameworks }}')
           $frameworks = @()
-          try { $frameworks = [Text.Json.JsonSerializer]::Deserialize($fwJson,[object]) } catch { $frameworks = @() }
+          try { if ($fwJson -and $fwJson -ne '[]') { $frameworks = ConvertFrom-Json -InputObject $fwJson } } catch { $frameworks = @() }
           if ($autoFw -and ($null -eq $frameworks -or $frameworks.Count -eq 0)) {
             $testProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -match '\\.Tests\\.csproj$' }
             $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -138,7 +138,8 @@ jobs:
           }
           if ($sdks.Count -eq 0) {
             try {
-              $inp = [Text.Json.JsonSerializer]::Deserialize('${{ inputs.dotnet_versions }}',[object])
+              $raw = '${{ inputs.dotnet_versions }}'
+              $inp = @(); if ($raw) { $inp = ConvertFrom-Json -InputObject $raw }
               foreach ($i in $inp) { if ($i) { [void]$sdks.Add([string]$i) } }
             } catch { }
           }
@@ -196,7 +197,7 @@ jobs:
           $sln = '${{ steps.sln.outputs.sln }}'
           $verbosity = '${{ inputs.test_verbosity }}'
           $cfg = '${{ inputs.build_configuration }}'
-          $frameworks = @(); try { $frameworks = [Text.Json.JsonSerializer]::Deserialize('${{ inputs.frameworks }}',[object]) } catch { }
+          $frameworks = @(); try { $raw = '${{ inputs.frameworks }}'; if ($raw -and $raw -ne '[]') { $frameworks = ConvertFrom-Json -InputObject $raw } } catch { }
           function Run-Test($fw) {
             $fwArg = if ($fw) { "--framework $fw" } else { '' }
             $logName = if ($fw) { "results-$fw.trx" } else { "results.trx" }
