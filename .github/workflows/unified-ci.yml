@@ -46,6 +46,11 @@ on:
         required: false
         default: '["8.0.x"]'
         type: string
+      auto_detect_sdks:
+        description: 'Automatically detect SDK versions from global.json and TFMs'
+        required: false
+        default: true
+        type: boolean
       frameworks:
         description: 'JSON array of test frameworks (TFMs) to run; empty = all'
         required: false
@@ -212,6 +217,7 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runs_on) }}
     outputs:
       frameworks: ${{ steps.out.outputs.frameworks }}
+      sdks: ${{ steps.out.outputs.sdks }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1 }
@@ -226,35 +232,64 @@ jobs:
           if ($parsed -and $parsed.Count -gt 0) {
             $json = [Text.Json.JsonSerializer]::Serialize($parsed)
             "frameworks=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            exit 0
+          } else {
+            # Otherwise scan *.Tests.csproj and union their TFMs
+            $testProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -match '\\.Tests\\.csproj$' }
+            $frameworks = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($proj in $testProjects) {
+              try {
+                [xml]$xml = Get-Content -LiteralPath $proj.FullName
+                $tfs = @()
+                $tfs += ($xml.Project.PropertyGroup.TargetFrameworks | ForEach-Object { $_.InnerText })
+                $tfs += ($xml.Project.PropertyGroup.TargetFramework  | ForEach-Object { $_.InnerText })
+                foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) {
+                  [void]$frameworks.Add($tf)
+                }
+              } catch { }
+            }
+            # Filter frameworks by OS (avoid .NET Framework on non-Windows)
+            $isWindows = $env:RUNNER_OS -eq 'Windows'
+            if (-not $isWindows) {
+              $toRemove = @()
+              foreach ($f in $frameworks) { if ($f -match '^net4') { $toRemove += $f } }
+              foreach ($f in $toRemove) { [void]$frameworks.Remove($f) }
+            }
+            $outFws = if ($frameworks.Count -gt 0) { $frameworks } else { @('') } # empty string => no -f
+            $json = $outFws | ConvertTo-Json -Compress
+            "frameworks=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           }
 
-          # Otherwise scan *.Tests.csproj and union their TFMs
-          $testProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -match '\.Tests\.csproj$' }
-          $frameworks = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-          foreach ($proj in $testProjects) {
+          # SDK detection
+          $sdks = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+          $auto = [System.Convert]::ToBoolean('${{ inputs.auto_detect_sdks }}')
+          if ($auto) {
+            # From global.json
+            $globals = Get-ChildItem -Recurse -Path . -Filter global.json -File -ErrorAction SilentlyContinue
+            foreach ($g in $globals) {
+              try {
+                $gj = Get-Content -Raw -LiteralPath $g.FullName | ConvertFrom-Json
+                $ver = $gj.sdk.version
+                if ($ver -match '^(\d+)\.(\d+)\.') { [void]$sdks.Add("$($Matches[1]).$($Matches[2]).x") }
+              } catch { }
+            }
+            # From detected frameworks
+            $fws = $outFws
+            foreach ($fw in $fws) {
+              if ($fw -match '^net(\d+)\.(\d+)$') { [void]$sdks.Add("$($Matches[1]).$($Matches[2]).x") }
+            }
+          }
+
+          # If nothing detected, use user input; if still empty, default to 8.0.x
+          if ($sdks.Count -eq 0) {
             try {
-              [xml]$xml = Get-Content -LiteralPath $proj.FullName
-              $tfs = @()
-              $tfs += ($xml.Project.PropertyGroup.TargetFrameworks | ForEach-Object { $_.InnerText })
-              $tfs += ($xml.Project.PropertyGroup.TargetFramework  | ForEach-Object { $_.InnerText })
-              foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) {
-                [void]$frameworks.Add($tf)
-              }
+              $inp = [Text.Json.JsonSerializer]::Deserialize('${{ inputs.dotnet_versions }}',[object])
+              foreach ($i in $inp) { if ($i) { [void]$sdks.Add([string]$i) } }
             } catch { }
           }
+          if ($sdks.Count -eq 0) { [void]$sdks.Add('8.0.x') }
 
-          # Filter frameworks by OS (avoid .NET Framework on non-Windows)
-          $isWindows = $env:RUNNER_OS -eq 'Windows'
-          if (-not $isWindows) {
-            $toRemove = @()
-            foreach ($f in $frameworks) { if ($f -match '^net4') { $toRemove += $f } }
-            foreach ($f in $toRemove) { [void]$frameworks.Remove($f) }
-          }
-
-          $out = if ($frameworks.Count -gt 0) { $frameworks } else { @('') } # empty string => no -f
-          $json = $out | ConvertTo-Json -Compress
-          "frameworks=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          $jsonSdks = $sdks | ConvertTo-Json -Compress
+          "sdks=$jsonSdks" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
   # .NET build/test
   dotnet:
@@ -268,7 +303,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sdk: ${{ fromJSON(inputs.dotnet_versions) }}
+        sdk: ${{ fromJSON(needs.detect.outputs.sdks) }}
         framework: ${{ fromJSON(needs.detect.outputs.frameworks) }}
     steps:
       - uses: actions/checkout@v4

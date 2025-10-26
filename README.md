@@ -54,6 +54,8 @@ Key inputs (high level)
 -----------------------
 - Unified CI (`.github/workflows/unified-ci.yml`):
   - `run_tests` (bool) – run .NET tests; `dotnet_versions` JSON; `frameworks` JSON; `solution` glob or path.
+    - When `frameworks` is empty, TFMs are auto-detected from `*.Tests.csproj` and used as a matrix (per TFM, per SDK).
+  - `auto_detect_sdks` (bool, default true) – infer SDKs from global.json and TFMs when `dotnet_versions` not explicitly set; falls back to `8.0.x`.
   - `build_configuration` for .NET build/test (default `Debug`).
   - `run_pester` (bool) – run Pester; optional `test_script`; `ps_versions` JSON.
   - `rebuild_psd1` (bool) – refresh manifest via PSPublishModule; `module_manifest`, `build_script`.
