@@ -24,6 +24,9 @@ What’s included
   - `.github/actions/pester-summary` – print only failing Pester tests.
   - `.github/actions/ps-refresh-psd1` – install PSPublishModule and refresh PSD1; optional commit.
   - `.github/actions/enforce-encoding` – check/fix encoding (e.g., `utf8NoBOM`).
+  - `.github/actions/dotnet-run-tests` – restore/build (optional), auto-detect TFMs, run `dotnet test` with TRX and coverage, emit per-framework counts JSON.
+  - `.github/actions/pester-runner` – detect/execute Pester tests (PS 5.1/7), produce NUnit XML and counts JSON, configurable empty-tests policy.
+  - `.github/actions/aggregate-summary` – aggregate TRX + NUnit XML + counts into a markdown summary and optional sticky PR comment.
 
 Quick start (copy one file)
 ---------------------------
@@ -100,6 +103,7 @@ Runner flexibility
 ------------------------------
 - .NET: TRX parsing via `.github/actions/dotnet-test-summary` prints only failing tests to logs and the job Summary on failures.
 - PowerShell: NUnit XML parsing via `.github/actions/pester-summary`.
+ - Consolidated PR comment: `.github/actions/aggregate-summary` builds a single sticky comment with a totals table, job status, failing tests, and an artifacts link.
 
 Encoding checks
 ---------------

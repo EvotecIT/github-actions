@@ -104,18 +104,7 @@ jobs:
           dotnet_version: ${{ inputs.dotnet_version }}
         timeout-minutes: 30
 
-      - name: Detect test files
-        id: tests
-        shell: pwsh
-        run: |
-          $path = '${{ inputs.tests_path }}'
-          $exists = Test-Path -Path $path
-          $count = 0
-          if ($exists) {
-            $count = (Get-ChildItem -Path $path -Recurse -File -Include *.Tests.ps1,*.tests.ps1 -ErrorAction SilentlyContinue | Measure-Object).Count
-          }
-          Write-Host "Found $count test files under $path"
-          "has_tests=$([string]([bool]($count -gt 0)))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      # Detection now happens inside the pester-runner composite
 
       - name: Setup .NET (optional)
         if: ${{ false }}
