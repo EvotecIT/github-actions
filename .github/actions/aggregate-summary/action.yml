@@ -1,0 +1,77 @@
+name: "Aggregate CI Summary"
+description: "Aggregate .NET TRX and Pester NUnit results into a markdown summary and optional sticky PR comment"
+inputs:
+  artifacts_path:
+    description: "Root folder where artifacts were downloaded"
+    required: false
+    default: artifacts
+  res_dotnet_windows:
+    description: ".NET Windows job result"
+    required: false
+    default: ''
+  res_dotnet_ubuntu:
+    description: ".NET Ubuntu job result"
+    required: false
+    default: ''
+  res_dotnet_macos:
+    description: ".NET macOS job result"
+    required: false
+    default: ''
+  res_pester_windows:
+    description: "Pester Windows job result"
+    required: false
+    default: ''
+  summary_comment_tag:
+    description: "Marker to make the PR comment sticky"
+    required: false
+    default: evotec-ci-aggregate-summary
+  post_pr_comment:
+    description: "Post sticky PR comment when on pull_request"
+    required: false
+    default: 'false'
+outputs:
+  markdown:
+    description: "Generated markdown summary"
+    value: ${{ steps.aggregate.outputs.markdown }}
+  hasfailures:
+    description: "True when any failing tests or jobs detected"
+    value: ${{ steps.aggregate.outputs.hasfailures }}
+runs:
+  using: composite
+  steps:
+    - id: aggregate
+      name: Build consolidated summary
+      shell: pwsh
+      env:
+        RES_DOTNET_WINDOWS: ${{ inputs.res_dotnet_windows }}
+        RES_DOTNET_UBUNTU:  ${{ inputs.res_dotnet_ubuntu }}
+        RES_DOTNET_MACOS:   ${{ inputs.res_dotnet_macos }}
+        RES_PESTER_WINDOWS: ${{ inputs.res_pester_windows }}
+      run: |
+        & "${{ github.action_path }}/scripts/aggregate.ps1" -ArtifactsRoot "${{ inputs.artifacts_path }}" -SummaryMarker "${{ inputs.summary_comment_tag }}"
+
+    - name: Post consolidated PR comment
+      if: ${{ inputs.post_pr_comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      env:
+        SUMMARY_MARKER: ${{ inputs.summary_comment_tag }}
+        BODY: ${{ steps.aggregate.outputs.markdown }}
+      with:
+        script: |
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          const issue_number = context.payload.pull_request.number;
+          const marker = `<!-- ${process.env.SUMMARY_MARKER} -->`;
+          let md = process.env.BODY || '';
+          const run_id = context.runId;
+          md += `\n\n### Artifacts\n- [View all artifacts for this run](https://github.com/${owner}/${repo}/actions/runs/${run_id})\n`;
+          const sticky = true;
+          const comments = await github.paginate(github.rest.issues.listComments, {owner, repo, issue_number, per_page: 100});
+          const found = comments.find(c => typeof c.body === 'string' && c.body.includes(marker));
+          const body = `${marker}\n${md}`;
+          if (found && sticky) {
+            await github.rest.issues.updateComment({ owner, repo, comment_id: found.id, body });
+          } else {
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+          }
+
