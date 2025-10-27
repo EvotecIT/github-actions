@@ -3,11 +3,6 @@ name: Evotec .NET CI
 on:
   workflow_call:
     inputs:
-      os_label:
-        description: 'Human-friendly OS label for job name (e.g. Windows, Ubuntu, macOS)'
-        required: false
-        default: ''
-        type: string
       solution:
         description: "Path to .sln (or directory to search)"
         required: false
@@ -74,7 +69,7 @@ on:
 jobs:
   test-auto:
     if: ${{ inputs.frameworks == '' || inputs.frameworks == '[]' }}
-    name: dotnet (${{ inputs.os_label }} | auto TFMs | SDK ${{ matrix.sdk }})
+    name: dotnet (auto TFMs | SDK ${{ matrix.sdk }})
     runs-on: ${{ fromJSON(inputs.os) }}
     strategy:
       fail-fast: false
@@ -143,7 +138,7 @@ jobs:
 
   test-matrix:
     if: ${{ inputs.frameworks != '' && inputs.frameworks != '[]' }}
-    name: dotnet (${{ inputs.os_label }} | ${{ matrix.framework }} | SDK ${{ matrix.sdk }})
+    name: dotnet (${{ matrix.framework }} | SDK ${{ matrix.sdk }})
     runs-on: ${{ fromJSON(inputs.os) }}
     strategy:
       fail-fast: false
