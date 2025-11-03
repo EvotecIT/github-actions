@@ -1,93 +1,59 @@
 param(
-  [Parameter(Mandatory)] [string]$Solution,
-  [string]$Configuration = 'Release',
-  [string]$Verbosity = 'minimal',
-  [string]$FrameworksJson = '[]',
-  [bool]$EnableCoverage = $true,
-  [string]$Sdk = ''
+    [Parameter(Mandatory)] [string]$Solution,
+    [string]$Configuration = 'Release',
+    [string]$Verbosity = 'minimal',
+    [string]$FrameworksJson = '[]',
+    [bool]$EnableCoverage = $true,
+    [string]$Sdk = ''
 )
 
 $ErrorActionPreference = 'Stop'
 
-# Determine frameworks: explicit input or auto-detect
+# Frameworks: parse only from input; provide OS-based defaults when empty.
 $frameworks = @()
-try { if ($FrameworksJson -and $FrameworksJson -ne '[]') { $frameworks = ConvertFrom-Json -InputObject $FrameworksJson } } catch { }
-
-# Detect test project TFMs
-$testFrameworks = @()
-if ($frameworks.Count -eq 0) {
-  $testSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-  $testProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -match '\.Tests\.csproj$' }
-  foreach ($proj in $testProjects) {
-    try {
-      $rawXml = Get-Content -Raw -LiteralPath $proj.FullName
-      [xml]$xml = $rawXml
-      $tfs = @();
-      $tfs += ($xml.Project.PropertyGroup.TargetFrameworks | ForEach-Object { $_.InnerText })
-      $tfs += ($xml.Project.PropertyGroup.TargetFramework  | ForEach-Object { $_.InnerText })
-      if ($tfs.Count -eq 0) {
-        # Fallback to regex if XML properties not found due to unusual layout
-        $m1 = [regex]::Match($rawXml, '<TargetFrameworks>([^<]+)</TargetFrameworks>', 'IgnoreCase')
-        if ($m1.Success) { $tfs += $m1.Groups[1].Value }
-        $m2 = [regex]::Match($rawXml, '<TargetFramework>([^<]+)</TargetFramework>', 'IgnoreCase')
-        if ($m2.Success) { $tfs += $m2.Groups[1].Value }
-      }
-      foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) { [void]$testSet.Add($tf) }
-    } catch { }
-  }
-  $testFrameworks = @($testSet)
-  if ($env:RUNNER_OS -ne 'Windows') { $testFrameworks = @($testFrameworks | Where-Object { $_ -notmatch '^net4' }) }
-}
-
-# Detect main library TFMs
-$libFrameworks = @()
 try {
-  $libSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-  $libProjects = Get-ChildItem -Recurse -Path . -Filter *.csproj | Where-Object { $_.Name -notmatch '\.Tests\.csproj$' }
-  foreach ($proj in $libProjects) {
-    try {
-      [xml]$xml = Get-Content -LiteralPath $proj.FullName
-      $tfs = @();
-      $tfs += ($xml.Project.PropertyGroup.TargetFrameworks | ForEach-Object { $_.InnerText })
-      $tfs += ($xml.Project.PropertyGroup.TargetFramework  | ForEach-Object { $_.InnerText })
-      foreach ($tf in ($tfs -split ';' | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })) { [void]$libSet.Add($tf) }
-    } catch { }
-  }
-  $libFrameworks = @($libSet)
+    $json = ($FrameworksJson ?? '').Trim()
+    if ($json -and $json -ne '[]') {
+        $parsed = ConvertFrom-Json -InputObject $json -Depth 10
+        if ($parsed -is [string]) {
+            if ($parsed.Trim()) { $frameworks = @($parsed.Trim()) }
+        } elseif ($parsed -is [System.Collections.IEnumerable]) {
+            foreach ($x in $parsed) { if ([string]$x) { $frameworks += ([string]$x) } }
+        }
+    }
 } catch { }
 
-# Choose frameworks to run: tests TFMs (if auto) or provided input
 if ($frameworks.Count -eq 0) {
-  if ($testFrameworks.Count -gt 0) { $frameworks = $testFrameworks } else { $frameworks = @('') }
+    if ($env:RUNNER_OS -eq 'Windows') { $frameworks = @('net8.0', 'net472') } else { $frameworks = @('net8.0') }
 }
 
-# Note any library TFMs that are not testable by current test projects
-$missingForTests = @()
-foreach ($lf in $libFrameworks) { if ($lf -notin $frameworks) { $missingForTests += $lf } }
-
-function Run-Test($fw) {
-  $fwArg = if ($fw) { "--framework $fw" } else { '' }
-  $fwSafe = if ($fw) { $fw } else { 'all' }
-  $subdir = Join-Path -Path 'artifacts/TestResults' -ChildPath ("fw-$fwSafe")
-  New-Item -ItemType Directory -Force -Path $subdir | Out-Null
-  $logName = "results-$fwSafe.trx"
-  $collect = $EnableCoverage ? '--collect:"XPlat Code Coverage"' : ''
-  $cmd = "dotnet test `"$Solution`" --configuration $Configuration --verbosity $Verbosity --logger `"console;verbosity=$Verbosity`" --logger `"trx;LogFileName=$logName`" --results-directory `"$subdir`" $collect $fwArg"
-  Write-Host $cmd
-  $logsDir = Join-Path $PWD 'artifacts/Logs'
-  New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
-  $logPath = Join-Path $logsDir ("dotnet-$fwSafe.log")
-  & dotnet test $Solution --configuration $Configuration --verbosity $Verbosity --logger "console;verbosity=$Verbosity" --logger "trx;LogFileName=$logName" --results-directory "$subdir" $collect $fwArg *>&1 | Tee-Object -FilePath $logPath
-  $code = $LASTEXITCODE
-  $script:FrameworkRuns["$fwSafe"] = @{ Code = $code; Log = $logPath; Subdir = $subdir; RawFramework = $fw }
-  return $code
+function Invoke-DotNetTest {
+    param(
+        [Parameter(Mandatory)]
+        [string]$fw
+    )
+    $fwArg = if ($fw) { "--framework $fw" } else { '' }
+    $fwSafe = if ($fw) { $fw } else { 'all' }
+    $subdir = Join-Path -Path 'artifacts/TestResults' -ChildPath ("fw-$fwSafe")
+    New-Item -ItemType Directory -Force -Path $subdir | Out-Null
+    $logName = "results-$fwSafe.trx"
+    $collect = $EnableCoverage ? '--collect:"XPlat Code Coverage"' : ''
+    $cmd = "dotnet test `"$Solution`" --configuration $Configuration --verbosity $Verbosity --logger `"console;verbosity=$Verbosity`" --logger `"trx;LogFileName=$logName`" --results-directory `"$subdir`" $collect $fwArg"
+    Write-Host $cmd
+    $logsDir = Join-Path $PWD 'artifacts/Logs'
+    New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+    $logPath = Join-Path $logsDir ("dotnet-$fwSafe.log")
+    & dotnet test $Solution --configuration $Configuration --verbosity $Verbosity --logger "console;verbosity=$Verbosity" --logger "trx;LogFileName=$logName" --results-directory "$subdir" $collect $fwArg *>&1 | Tee-Object -FilePath $logPath
+    $code = $LASTEXITCODE
+    $script:FrameworkRuns["$fwSafe"] = @{ Code = $code; Log = $logPath; Subdir = $subdir; RawFramework = $fw }
+    return $code
 }
 
 $script:FrameworkRuns = @{}
 $overall = 0
 foreach ($fw in $frameworks) {
-  $code = Run-Test $fw
-  if ($code -ne 0) { $overall = $code }
+    $code = Invoke-DotNetTest -fw $fw
+    if ($code -ne 0) { $overall = $code }
 }
 
 # Emit counts JSON
@@ -96,103 +62,82 @@ $outDir = Join-Path $PWD 'artifacts/Counts'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $failedTotal = 0
 foreach ($trx in $all) {
-  $fw  = ($trx.Directory.Name -replace '^fw-',''); if (-not $fw) { $fw = 'all' }
-  $total = 0; $failed = 0; $passed = 0; $skipped = 0
-  try {
-    # Prefer Counters when present (robust across TRX variants)
-    $counters = Select-Xml -Path $trx.FullName -XPath "//*[local-name()='Counters']" | Select-Object -First 1
-    if ($counters) {
-      $n = $counters.Node
-      $toInt = { param($v) try { [int]$v } catch { 0 } }
-      $total  = & $toInt ($n.GetAttribute('total'))
-      $passed = & $toInt ($n.GetAttribute('passed'))
-      $failed = (& $toInt ($n.GetAttribute('failed'))) + (& $toInt ($n.GetAttribute('error'))) + (& $toInt ($n.GetAttribute('timeout'))) + (& $toInt ($n.GetAttribute('aborted')))
-      $skipped = $total - $passed - $failed
-      if ($skipped -lt 0) {
-        $skipped = (& $toInt ($n.GetAttribute('notExecuted'))) + (& $toInt ($n.GetAttribute('inconclusive'))) + (& $toInt ($n.GetAttribute('warning')))
-      }
-    } else {
-      # Fallback to per-test outcomes
-      $nodes = Select-Xml -Path $trx.FullName -XPath "//*[local-name()='UnitTestResult']"
-      foreach ($n in $nodes) {
-        $total++
-        $outcome = $n.Node.outcome; if (-not $outcome) { $outcome = $n.Node.GetAttribute('outcome') }
-        switch ($outcome) {
-          'Passed' { $passed++ }
-          'Failed' { $failed++ }
-          'Error'  { $failed++ }
-          'Timeout' { $failed++ }
-          'Aborted' { $failed++ }
-          default { $skipped++ }
+    $fw = ($trx.Directory.Name -replace '^fw-', ''); if (-not $fw) { $fw = 'all' }
+    $total = 0; $failed = 0; $passed = 0; $skipped = 0
+    try {
+        # Prefer Counters when present (robust across TRX variants)
+        $counters = Select-Xml -Path $trx.FullName -XPath "//*[local-name()='Counters']" | Select-Object -First 1
+        if ($counters) {
+            $n = $counters.Node
+            $toInt = { param($v) try { [int]$v } catch { 0 } }
+            $total = & $toInt ($n.GetAttribute('total'))
+            $passed = & $toInt ($n.GetAttribute('passed'))
+            $failed = (& $toInt ($n.GetAttribute('failed'))) + (& $toInt ($n.GetAttribute('error'))) + (& $toInt ($n.GetAttribute('timeout'))) + (& $toInt ($n.GetAttribute('aborted')))
+            $skipped = $total - $passed - $failed
+            if ($skipped -lt 0) {
+                $skipped = (& $toInt ($n.GetAttribute('notExecuted'))) + (& $toInt ($n.GetAttribute('inconclusive'))) + (& $toInt ($n.GetAttribute('warning')))
+            }
+        } else {
+            # Fallback to per-test outcomes
+            $nodes = Select-Xml -Path $trx.FullName -XPath "//*[local-name()='UnitTestResult']"
+            foreach ($n in $nodes) {
+                $total++
+                $outcome = $n.Node.outcome; if (-not $outcome) { $outcome = $n.Node.GetAttribute('outcome') }
+                switch ($outcome) {
+                    'Passed' { $passed++ }
+                    'Failed' { $failed++ }
+                    'Error' { $failed++ }
+                    'Timeout' { $failed++ }
+                    'Aborted' { $failed++ }
+                    default { $skipped++ }
+                }
+            }
+            if ($total -eq 0) {
+                # Last-resort textual scan
+                $raw = Get-Content -Raw -LiteralPath $trx.FullName
+                $failed += ([regex]::Matches($raw, 'outcome="(Failed|Error|Timeout|Aborted)"', 'IgnoreCase')).Count
+                $passed += ([regex]::Matches($raw, 'outcome="Passed"', 'IgnoreCase')).Count
+                $total = $failed + $passed
+            }
         }
-      }
-      if ($total -eq 0) {
-        # Last-resort textual scan
-        $raw = Get-Content -Raw -LiteralPath $trx.FullName
-        $failed += ([regex]::Matches($raw, 'outcome="(Failed|Error|Timeout|Aborted)"', 'IgnoreCase')).Count
-        $passed += ([regex]::Matches($raw, 'outcome="Passed"', 'IgnoreCase')).Count
-        $total = $failed + $passed
-      }
-    }
-  } catch { }
-  $obj = [ordered]@{ kind='dotnet'; os="$env:RUNNER_OS"; sdk=$Sdk; framework=$fw; total=$total; passed=$passed; failed=$failed; skipped=$skipped }
-  $jsonPath = Join-Path $outDir ("dotnet-$($env:RUNNER_OS)-$Sdk-$fw.json")
-  ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
-  $failedTotal += $failed
+    } catch { }
+    $obj = [ordered]@{ kind = 'dotnet'; os = "$env:RUNNER_OS"; sdk = $Sdk; framework = $fw; total = $total; passed = $passed; failed = $failed; skipped = $skipped }
+    $jsonPath = Join-Path $outDir ("dotnet-$($env:RUNNER_OS)-$Sdk-$fw.json")
+    ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
+    $failedTotal += $failed
 }
 
 # Prefer dotnet exit code; but if dotnet returned 0 and TRX shows failures, fail the step.
 # Enforce failure when any failed tests were detected in TRX
 if ($failedTotal -gt 0) {
-  Write-Error "Detected $failedTotal failed test(s) across TRX files. Failing step."
-  exit 1
+    Write-Error "Detected $failedTotal failed test(s) across TRX files. Failing step."
+    exit 1
 }
 
 # Emit build/test error JSON for frameworks that failed before producing TRX
 foreach ($key in $script:FrameworkRuns.Keys) {
-  $info = $script:FrameworkRuns[$key]
-  $fwRaw = [string]$info.RawFramework
-  if ($info.Code -ne 0) {
-    $expectedTrx = Join-Path $info.Subdir "results-$key.trx"
-    if (-not (Test-Path $expectedTrx)) {
-      try {
-        $msg = ''
-        if (Test-Path $info.Log) {
-          $errs = Select-String -Path $info.Log -Pattern '(^CSC\s*:.*error)|(error\s+[A-Z]*\d+)|(^Test Run Aborted)' -SimpleMatch:$false -AllMatches -ErrorAction SilentlyContinue
-          if ($errs) {
-            $msg = ($errs | Select-Object -First 3 | ForEach-Object { $_.Line.Trim() }) -join '; '
-          } else {
-            $tail = Get-Content -LiteralPath $info.Log -Tail 20 -ErrorAction SilentlyContinue
-            $msg = ($tail -join ' ')
-          }
+    $info = $script:FrameworkRuns[$key]
+    $fwRaw = [string]$info.RawFramework
+    if ($info.Code -ne 0) {
+        $expectedTrx = Join-Path $info.Subdir "results-$key.trx"
+        if (-not (Test-Path $expectedTrx)) {
+            try {
+                $msg = ''
+                if (Test-Path $info.Log) {
+                    $errs = Select-String -Path $info.Log -Pattern '(^CSC\s*:.*error)|(error\s+[A-Z]*\d+)|(^Test Run Aborted)' -SimpleMatch:$false -AllMatches -ErrorAction SilentlyContinue
+                    if ($errs) {
+                        $msg = ($errs | Select-Object -First 3 | ForEach-Object { $_.Line.Trim() }) -join '; '
+                    } else {
+                        $tail = Get-Content -LiteralPath $info.Log -Tail 20 -ErrorAction SilentlyContinue
+                        $msg = ($tail -join ' ')
+                    }
+                }
+                $obj = [ordered]@{ kind = 'dotnet-error'; os = "$env:RUNNER_OS"; sdk = $Sdk; framework = $fwRaw; message = $msg }
+                $jsonPath = Join-Path $outDir ("dotnet-error-$($env:RUNNER_OS)-$Sdk-$key.json")
+                ($obj | ConvertTo-Json -Depth 5) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
+            } catch { }
         }
-        $obj = [ordered]@{ kind='dotnet-error'; os="$env:RUNNER_OS"; sdk=$Sdk; framework=$fwRaw; message=$msg }
-        $jsonPath = Join-Path $outDir ("dotnet-error-$($env:RUNNER_OS)-$Sdk-$key.json")
-        ($obj | ConvertTo-Json -Depth 5) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
-      } catch { }
     }
-  }
 }
-
-# Emit a note JSON describing library vs test TFMs for the aggregator
-try {
-  $outDir = Join-Path $PWD 'artifacts/Counts'
-  New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-  $notes = [ordered]@{
-    kind = 'dotnet-notes'
-    os   = $env:RUNNER_OS
-    sdk  = $Sdk
-    lib_frameworks      = @($libFrameworks)
-    test_frameworks     = @($frameworks)
-    missing_for_tests   = @($missingForTests)
-  }
-  $jsonPath = Join-Path $outDir ("dotnet-notes-$($env:RUNNER_OS)-$Sdk.json")
-  ($notes | ConvertTo-Json -Depth 5) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
-  # Write a quick human summary
-  if ($env:GITHUB_STEP_SUMMARY) {
-    $det = if ($frameworks -and $frameworks.Count -gt 0) { ($frameworks -join ', ') } else { '(none)' }
-    "### .NET Test Runner`n- Detected frameworks: $det`n- Library frameworks: $(@($libFrameworks) -join ', ')`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-  }
-} catch { }
 
 exit $overall

@@ -13,7 +13,7 @@ runs:
   using: "composite"
   steps:
     - id: summarystep
-      name: Print failing tests summary
+      name: Summarize failed tests
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'

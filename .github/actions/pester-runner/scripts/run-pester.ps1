@@ -17,5 +17,5 @@ $cfg.Run.Exit = $true
 $cfg.TestResult.Enabled = $true
 $cfg.TestResult.OutputFormat = 'NUnitXml'
 $cfg.TestResult.OutputPath = $ResultsFile
-Invoke-Pester -Configuration $cfg
+Invoke-Pester -Configuration $cFfg
 

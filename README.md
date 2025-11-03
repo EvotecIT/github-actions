@@ -10,23 +10,23 @@ Goal
 What’s included
 ---------------
 - Reusable workflows (call via `uses:`):
-  - `.github/workflows/unified-ci.yml` – one-switch CI for .NET + PowerShell + Claude (all-in-one; shows skipped jobs too).
-  - `.github/workflows/ci-dotnet.yml` – .NET-only build/test/coverage. Auto-detects TFMs/SDKs.
-  - `.github/workflows/ci-powershell.yml` – PowerShell-only Pester (5.1/7), optional PSD1 refresh.
-- `.github/workflows/ci-orchestrator.yml` – single entry that fans out to `.NET`, `PowerShell`, Claude, and consolidated PR comment.
-  - `.github/workflows/release-dotnet.yml` – pack and push NuGet packages.
-  - `.github/workflows/release-powershell.yml` – publish module to PowerShell Gallery.
-  - `.github/workflows/review-claude.yml` – PR code review with Claude.
-  - `.github/workflows/maintenance-cleanup.yml` – artifacts/cache cleanup core.
+  - `.github/workflows/unified-ci.yml` - one-switch CI for .NET + PowerShell + Claude (all-in-one; shows skipped jobs too).
+  - `.github/workflows/ci-dotnet.yml` - .NET-only build/test/coverage. Runs the exact TFMs you provide per matrix.
+  - `.github/workflows/ci-powershell.yml` - PowerShell-only Pester (5.1/7), optional PSD1 refresh.
+- `.github/workflows/ci-orchestrator.yml` - single entry that fans out to `.NET`, `PowerShell`, Claude, and consolidated PR comment.
+  - `.github/workflows/release-dotnet.yml` - pack and push NuGet packages.
+  - `.github/workflows/release-powershell.yml` - publish module to PowerShell Gallery.
+  - `.github/workflows/review-claude.yml` - PR code review with Claude.
+  - `.github/workflows/maintenance-cleanup.yml` - artifacts/cache cleanup core.
 
 - Composite actions (reused internally and usable directly if needed):
-  - `.github/actions/dotnet-test-summary` – print only failing .NET tests (TRX parser).
-  - `.github/actions/pester-summary` – print only failing Pester tests.
-  - `.github/actions/ps-refresh-psd1` – install PSPublishModule and refresh PSD1; optional commit.
-  - `.github/actions/enforce-encoding` – check/fix encoding (e.g., `utf8NoBOM`).
-  - `.github/actions/dotnet-run-tests` – restore/build (optional), auto-detect TFMs, run `dotnet test` with TRX and coverage, emit per-framework counts JSON.
-  - `.github/actions/pester-runner` – detect/execute Pester tests (PS 5.1/7), produce NUnit XML and counts JSON, configurable empty-tests policy.
-  - `.github/actions/aggregate-summary` – aggregate TRX + NUnit XML + counts into a markdown summary and optional sticky PR comment.
+  - `.github/actions/dotnet-test-summary` - print only failing .NET tests (TRX parser).
+  - `.github/actions/pester-summary` - print only failing Pester tests.
+  - `.github/actions/ps-refresh-psd1` - install PSPublishModule and refresh PSD1; optional commit.
+  - `.github/actions/enforce-encoding` - check/fix encoding (e.g., `utf8NoBOM`).
+  - `.github/actions/dotnet-run-tests` - restore/build (optional), run `dotnet test` for provided TFMs with TRX and coverage, emit per-framework counts JSON.
+  - `.github/actions/pester-runner` - detect/execute Pester tests (PS 5.1/7), produce NUnit XML and counts JSON, configurable empty-tests policy.
+  - `.github/actions/aggregate-summary` - aggregate TRX + NUnit XML + counts into a markdown summary and optional sticky PR comment.
 
 Quick start (copy one file)
 ---------------------------
@@ -57,34 +57,30 @@ Templates (examples)
 Key inputs (high level)
 -----------------------
 - Unified CI (`.github/workflows/unified-ci.yml`):
-  - `run_tests` (bool) – run .NET tests; `dotnet_versions` JSON; `frameworks` JSON; `solution` glob or path.
-    - When `frameworks` is empty, TFMs are auto-detected from `*.Tests.csproj` and used as a matrix (per TFM, per SDK).
-  - `auto_detect_sdks` (bool, default true) – infer SDKs from global.json and TFMs when `dotnet_versions` not explicitly set; falls back to `8.0.x`.
+  - `run_tests` (bool) - run .NET tests; pass `dotnet_versions` JSON, `frameworks` JSON (required), and `solution` glob or path.
   - `build_configuration` for .NET build/test (default `Debug`).
-  - `run_pester` (bool) – run Pester; optional `test_script`; `ps_versions` JSON.
-  - `rebuild_psd1` (bool) – refresh manifest via PSPublishModule; `module_manifest`, `build_script`.
+  - `run_pester` (bool) - run Pester; optional `test_script`; `ps_versions` JSON.
+  - `rebuild_psd1` (bool) - refresh manifest via PSPublishModule; `module_manifest`, `build_script`.
   - `collect_coverage`, `summarize_failures`, `upload_artifacts`, `runs_on` JSON.
   - `enable_codecov` + `codecov_token`/`secrets.CODECOV_TOKEN`.
   - `claude_review` (bool), `claude_model`, `claude_prompt`, `claude_use_sticky_comment` (default true).
   - Failing-tests comment options (default off):
     - `post_summary_issue`: true/false to enable posting.
     - `post_summary_destination`: 'issue' or 'pr' (default 'issue').
-    - `sticky_summary_comment`: true/false (default true) – reuse/update the same comment via a hidden marker.
+    - `sticky_summary_comment`: true/false (default true) - reuse/update the same comment via a hidden marker.
     - `summary_comment_tag`: custom marker; default 'evotec-ci-summary'.
-    - `summary_issue_title`, `summary_issue_label` – when destination is 'issue'.
+    - `summary_issue_title`, `summary_issue_label` - when destination is 'issue'.
 
 - .NET CI (`.github/workflows/ci-dotnet.yml`):
   - `solution` (default `**/*.sln`), `os` JSON (e.g. `["windows-latest"]`).
-  - `auto_detect_frameworks` (default true) – scans `*.Tests.csproj` for TFMs and runs per-TFM.
-  - `auto_detect_sdks` (default true) – collects SDKs from `global.json` and TFMs (e.g., net9.0 → 9.0.x).
-  - `frameworks` and `dotnet_versions` still accepted; providing them disables auto-detect for that dimension.
-  - `summarize_failures` true/false – prints only failed tests on failure.
+  - `frameworks` JSON (required; defaults to `["net8.0"]`) and `dotnet_versions` JSON (defaults to `["8.0.x"]`).
+  - `summarize_failures` true/false - prints only failed tests on failure.
   - `enable_codecov` true/false and `codecov_token`/`secrets.CODECOV_TOKEN` if needed.
 
 - PowerShell CI (`.github/workflows/ci-powershell.yml`):
   - `module_manifest` and `build_script` (defaults to `Module/Build/Build-Module.ps1`).
-  - `rebuild_psd1` true/false – refresh manifest before tests (default false).
-  - `commit_psd1` true/false – commit refreshed manifest (safe for pushes and same-repo PRs).
+  - `rebuild_psd1` true/false - refresh manifest before tests (default false).
+  - `commit_psd1` true/false - commit refreshed manifest (safe for pushes and same-repo PRs).
   - `ps_versions` JSON (e.g. `["5.1","7"]`) and `runs_on` JSON (e.g. `["windows-latest"]`).
   - Optional `solution` to build .NET bits before tests, and optional `test_script` to run custom tests.
 
@@ -136,22 +132,23 @@ Notes
 - If your `Build-Module.ps1` in `PSPublishModule` already handles encoding or manifest generation, continue using it; the CI wraps around those semantics.
 Orchestrator inputs (ci-orchestrator.yml)
 ----------------------------------------
-- `solution` – path or glob to the solution; default `**/*.sln`.
+- `solution` - path or glob to the solution; default `**/*.sln`.
 - `.NET`:
-  - `os_dotnet` – JSON of runners, default `["windows-latest","ubuntu-latest","macos-latest"]`.
-  - `dotnet_frameworks` – JSON of TFMs to test; empty means auto-detect from `*.Tests.csproj`.
-  - `dotnet_build_configuration` – build config passed to tests, default `Release`.
-  - `enable_codecov` – upload coverage to Codecov (tokenless on public repos).
+  - `os_dotnet` - JSON of runners, default `["windows-latest","ubuntu-latest","macos-latest"]`.
+  - `dotnet_frameworks_windows` - JSON of Windows TFMs (default `["net472","net8.0"]`).
+  - `dotnet_frameworks_unix` - JSON of Linux/macOS TFMs (default `["net8.0"]`).
+  - `dotnet_build_configuration` - build config passed to tests, default `Release`.
+  - `enable_codecov` - upload coverage to Codecov (tokenless on public repos).
 - `PowerShell`:
-  - `ps_run` – whether to run Pester jobs (default true).
-  - `ps_versions` – JSON of PS versions, default `["5.1","7"]`.
-  - `ps_runs_on` – JSON runner labels for Pester jobs, default `["windows-latest"]`.
-  - `ps_module_manifest` – path to `.psd1`.
-  - `ps_test_script` – custom test script; otherwise, looks under `ps_tests_path`.
-  - `ps_tests_path` – folder with `*.Tests.ps1`, default `Module/Tests`.
-  - `ps_empty_tests_behavior` – `skip` | `warn` | `fail` when no tests (default `fail`).
+  - `ps_run` - whether to run Pester jobs (default true).
+  - `ps_versions` - JSON of PS versions, default `["5.1","7"]`.
+  - `ps_runs_on` - JSON runner labels for Pester jobs, default `["windows-latest"]`.
+  - `ps_module_manifest` - path to `.psd1`.
+  - `ps_test_script` - custom test script; otherwise, looks under `ps_tests_path`.
+  - `ps_tests_path` - folder with `*.Tests.ps1`, default `Module/Tests`.
+  - `ps_empty_tests_behavior` - `skip` | `warn` | `fail` when no tests (default `skip`).
 - `Claude`:
-  - `claude_review` – run Claude PR review (requires `CLAUDE_CODE_OAUTH_TOKEN`).
-  - `claude_runs_on` – JSON runner labels for Claude job.
+  - `claude_review` - run Claude PR review (requires `CLAUDE_CODE_OAUTH_TOKEN`).
+  - `claude_runs_on` - JSON runner labels for Claude job.
 - Commenting:
-  - `post_pr_comment` – always post a consolidated sticky PR comment (totals table, status, failing tests, and artifacts link).
+  - `post_pr_comment` - always post a consolidated sticky PR comment (totals table, status, failing tests, and artifacts link).

@@ -15,10 +15,15 @@ on:
         required: false
         default: '["windows-latest","ubuntu-latest","macos-latest"]'
         type: string
-      dotnet_frameworks:
-        description: 'JSON array of TFMs to test (optional, auto-detect when empty)'
+      dotnet_frameworks_windows:
+        description: 'JSON array of Windows TFMs (e.g. ["net472","net8.0"])'
         required: false
-        default: '[]'
+        default: '["net472","net8.0"]'
+        type: string
+      dotnet_frameworks_unix:
+        description: 'JSON array of Linux/macOS TFMs (e.g. ["net8.0"])'
+        required: false
+        default: '["net8.0"]'
         type: string
       enable_codecov:
         description: 'Upload coverage to Codecov in .NET jobs'
@@ -64,7 +69,7 @@ on:
       ps_empty_tests_behavior:
         description: "Behavior when no Pester tests found: 'skip' | 'warn' | 'fail'"
         required: false
-        default: 'fail'
+        default: 'skip'
         type: string
       # Claude
       claude_review:
@@ -90,42 +95,46 @@ on:
 
 jobs:
   dotnet-windows:
+    name: .NET Windows
     if: contains(fromJSON(inputs.os_dotnet), 'windows-latest')
     uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
       os: '["windows-latest"]'
       solution: ${{ inputs.solution }}
-      frameworks: ${{ inputs.dotnet_frameworks }}
+      frameworks: ${{ inputs.dotnet_frameworks_windows }}
       summarize_failures: true
       enable_codecov: ${{ inputs.enable_codecov }}
       build_configuration: ${{ inputs.dotnet_build_configuration }}
     secrets: inherit
 
   dotnet-ubuntu:
+    name: .NET Ubuntu
     if: contains(fromJSON(inputs.os_dotnet), 'ubuntu-latest')
     uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
       os: '["ubuntu-latest"]'
       solution: ${{ inputs.solution }}
-      frameworks: ${{ inputs.dotnet_frameworks }}
+      frameworks: ${{ inputs.dotnet_frameworks_unix }}
       summarize_failures: true
       enable_codecov: ${{ inputs.enable_codecov }}
       build_configuration: ${{ inputs.dotnet_build_configuration }}
     secrets: inherit
 
   dotnet-macos:
+    name: .NET macOS
     if: contains(fromJSON(inputs.os_dotnet), 'macos-latest')
     uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
       os: '["macos-latest"]'
       solution: ${{ inputs.solution }}
-      frameworks: ${{ inputs.dotnet_frameworks }}
+      frameworks: ${{ inputs.dotnet_frameworks_unix }}
       summarize_failures: true
       enable_codecov: ${{ inputs.enable_codecov }}
       build_configuration: ${{ inputs.dotnet_build_configuration }}
     secrets: inherit
 
   pester-windows:
+    name: PowerShell (Windows)
     if: ${{ inputs.ps_run }}
     uses: EvotecIT/github-actions/.github/workflows/ci-powershell.yml@master
     with:

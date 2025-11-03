@@ -1,5 +1,5 @@
 name: "Dotnet Run Tests"
-description: "Restore/build (optional), auto-detect TFMs, run dotnet test with TRX and optional coverage, and emit per-framework counts"
+description: "Restore/build (optional), run dotnet test for provided TFMs with TRX and optional coverage, and emit per-framework counts"
 inputs:
   solution:
     description: "Path or glob to .sln"
@@ -16,7 +16,7 @@ inputs:
     required: false
     default: minimal
   frameworks:
-    description: "JSON array of TFMs (empty = auto-detect)"
+    description: "JSON array of TFMs (empty = OS defaults)"
     required: false
     default: '[]'
   restore_build_first:
@@ -48,6 +48,11 @@ runs:
       with:
         dotnet-version: ${{ inputs.sdk }}
 
+    - name: Show dotnet info
+      shell: bash
+      run: |
+        dotnet --info
+
     - id: sln
       name: Resolve solution
       shell: pwsh
@@ -61,13 +66,13 @@ runs:
         if (-not $sln) { throw "No solution .sln found (pattern: $pattern)" }
         "sln=$sln" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-    - name: Restore (Windows only)
+    - name: Restore solution (Windows only)
       if: ${{ inputs.restore_build_first == 'true' && runner.os == 'Windows' }}
       shell: bash
       run: |
         dotnet restore "${{ steps.sln.outputs.sln }}"
 
-    - name: Build (Windows only)
+    - name: Build solution (Windows only)
       if: ${{ inputs.restore_build_first == 'true' && runner.os == 'Windows' }}
       shell: bash
       run: |
@@ -79,16 +84,21 @@ runs:
       env:
         SDK: ${{ inputs.sdk }}
       run: |
-        & "${{ github.action_path }}/scripts/run-tests.ps1" `
-          -Solution "${{ steps.sln.outputs.sln }}" `
-          -Configuration "${{ inputs.build_configuration }}" `
-          -Verbosity "${{ inputs.test_verbosity }}" `
-          -FrameworksJson "${{ inputs.frameworks }}" `
-          -EnableCoverage ([bool]::Parse('${{ inputs.enable_coverage }}')) `
-          -Sdk "$env:SDK"
+        $FrameworksJson = @'
+${{ inputs.frameworks }}
+@'
+        $params = @{
+          Solution       = "${{ steps.sln.outputs.sln }}"
+          Configuration  = "${{ inputs.build_configuration }}"
+          Verbosity      = "${{ inputs.test_verbosity }}"
+          FrameworksJson = $FrameworksJson
+          EnableCoverage = [bool]::Parse('${{ inputs.enable_coverage }}')
+          Sdk            = "$env:SDK"
+        }
+        & "${{ github.action_path }}/scripts/run-tests.ps1" @params
 
     - id: out
-      name: Emit outputs
+      name: Set action outputs
       shell: pwsh
       run: |
         "trx_glob=artifacts/TestResults/**/*.trx" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
