@@ -38,7 +38,7 @@ on:
         required: false
         default: true
         type: boolean
-      enable_codecov:
+      codecov_enable:
         description: 'Upload coverage to Codecov'
         required: false
         default: false
@@ -111,7 +111,7 @@ jobs:
           path: '**/coverage.cobertura.xml'
 
       - name: Upload to Codecov
-        if: inputs.enable_codecov && hashFiles('**/coverage.cobertura.xml') != ''
+        if: inputs.codecov_enable && hashFiles('**/coverage.cobertura.xml') != ''
         uses: codecov/codecov-action@v4
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

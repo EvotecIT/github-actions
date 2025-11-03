@@ -62,7 +62,7 @@ Key inputs (high level)
   - `run_pester` (bool) - run Pester; optional `test_script`; `ps_versions` JSON.
   - `rebuild_psd1` (bool) - refresh manifest via PSPublishModule; `module_manifest`, `build_script`.
   - `collect_coverage`, `summarize_failures`, `upload_artifacts`, `runs_on` JSON.
-  - `enable_codecov` + `codecov_token`/`secrets.CODECOV_TOKEN`.
+  - `codecov_enable` + `codecov_token`/`secrets.CODECOV_TOKEN`.
   - `claude_review` (bool), `claude_model`, `claude_prompt`, `claude_use_sticky_comment` (default true).
   - Failing-tests comment options (default off):
     - `post_summary_issue`: true/false to enable posting.
@@ -75,13 +75,13 @@ Key inputs (high level)
   - `solution` (default `**/*.sln`), `os` JSON (e.g. `["windows-latest"]`).
   - `frameworks` JSON (required; defaults to `["net8.0"]`) and `dotnet_versions` JSON (defaults to `["8.0.x"]`).
   - `summarize_failures` true/false - prints only failed tests on failure.
-  - `enable_codecov` true/false and `codecov_token`/`secrets.CODECOV_TOKEN` if needed.
+  - `codecov_enable` true/false and `codecov_token`/`secrets.CODECOV_TOKEN` if needed.
 
 - PowerShell CI (`.github/workflows/ci-powershell.yml`):
   - `module_manifest` and `build_script` (defaults to `Module/Build/Build-Module.ps1`).
   - `rebuild_psd1` true/false - refresh manifest before tests (default false).
   - `commit_psd1` true/false - commit refreshed manifest (safe for pushes and same-repo PRs).
-  - `ps_versions` JSON (e.g. `["5.1","7"]`) and `runs_on` JSON (e.g. `["windows-latest"]`).
+  - Called per-OS by the orchestrator with explicit pairs: runs_on + ps_versions.
   - Optional `solution` to build .NET bits before tests, and optional `test_script` to run custom tests.
 
 - .NET Release (`.github/workflows/release-dotnet.yml`):
@@ -133,16 +133,19 @@ Notes
 Orchestrator inputs (ci-orchestrator.yml)
 ----------------------------------------
 - `solution` - path or glob to the solution; default `**/*.sln`.
-- `.NET`:
-  - `os_dotnet` - JSON of runners, default `["windows-latest","ubuntu-latest","macos-latest"]`.
-  - `dotnet_frameworks_windows` - JSON of Windows TFMs (default `["net472","net8.0"]`).
-  - `dotnet_frameworks_unix` - JSON of Linux/macOS TFMs (default `["net8.0"]`).
-  - `dotnet_build_configuration` - build config passed to tests, default `Release`.
-  - `enable_codecov` - upload coverage to Codecov (tokenless on public repos).
+- `.NET` (explicit per-OS pairs):
+  - `dotnet_windows_runs_on` – JSON labels for Windows job (default `["windows-latest"]`).
+  - `dotnet_windows_frameworks` – JSON TFMs for Windows (default `["net472","net8.0"]`).
+  - `dotnet_ubuntu_runs_on` – JSON labels for Ubuntu job (default `["ubuntu-latest"]`).
+  - `dotnet_ubuntu_frameworks` – JSON TFMs for Ubuntu (default `["net8.0"]`).
+  - `dotnet_macos_runs_on` – JSON labels for macOS job (default `["macos-latest"]`).
+  - `dotnet_macos_frameworks` – JSON TFMs for macOS (default `["net8.0"]`).
+  - `dotnet_build_configuration` – build config passed to tests, default `Release`.
+  - `codecov_enable` – upload coverage to Codecov (tokenless on public repos); `codecov_token` optional.
 - `PowerShell`:
-  - `ps_run` - whether to run Pester jobs (default true).
-  - `ps_versions` - JSON of PS versions, default `["5.1","7"]`.
-  - `ps_runs_on` - JSON runner labels for Pester jobs, default `["windows-latest"]`.
+  - `ps_windows_runs_on` / `ps_windows_versions` – Windows Pester job (defaults `["windows-latest"]` / `["5.1","7"]`).
+  - `ps_ubuntu_runs_on` / `ps_ubuntu_versions` – Ubuntu Pester job (defaults `[]` / `["7"]`).
+  - `ps_macos_runs_on` / `ps_macos_versions` – macOS Pester job (defaults `[]` / `["7"]`).
   - `ps_module_manifest` - path to `.psd1`.
   - `ps_test_script` - custom test script; otherwise, looks under `ps_tests_path`.
   - `ps_tests_path` - folder with `*.Tests.ps1`, default `Module/Tests`.

@@ -35,7 +35,7 @@ jobs:
       run_tests: true
       run_pester: false
       collect_coverage: true
-      enable_codecov: true
+      codecov_enable: true
       dotnet_versions: '["8.0.x","9.0.x"]'
       frameworks: '["net8.0"]'
       summarize_failures: true

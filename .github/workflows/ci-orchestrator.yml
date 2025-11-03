@@ -9,23 +9,38 @@ on:
         required: false
         default: '**/*.sln'
         type: string
-      # .NET
-      os_dotnet:
-        description: 'JSON array of OS runners for .NET (e.g. ["windows-latest","ubuntu-latest","macos-latest"])'
+      # .NET (explicit per-OS pairs)
+      dotnet_windows_runs_on:
+        description: 'JSON array of runner labels for the Windows job'
         required: false
-        default: '["windows-latest","ubuntu-latest","macos-latest"]'
+        default: '["windows-latest"]'
         type: string
-      dotnet_frameworks_windows:
-        description: 'JSON array of Windows TFMs (e.g. ["net472","net8.0"])'
+      dotnet_windows_frameworks:
+        description: 'JSON array of Windows TFMs to test'
         required: false
         default: '["net472","net8.0"]'
         type: string
-      dotnet_frameworks_unix:
-        description: 'JSON array of Linux/macOS TFMs (e.g. ["net8.0"])'
+      dotnet_ubuntu_runs_on:
+        description: 'JSON array of runner labels for the Ubuntu job'
+        required: false
+        default: '["ubuntu-latest"]'
+        type: string
+      dotnet_ubuntu_frameworks:
+        description: 'JSON array of Ubuntu TFMs to test'
         required: false
         default: '["net8.0"]'
         type: string
-      enable_codecov:
+      dotnet_macos_runs_on:
+        description: 'JSON array of runner labels for the macOS job'
+        required: false
+        default: '["macos-latest"]'
+        type: string
+      dotnet_macos_frameworks:
+        description: 'JSON array of macOS TFMs to test'
+        required: false
+        default: '["net8.0"]'
+        type: string
+      codecov_enable:
         description: 'Upload coverage to Codecov in .NET jobs'
         required: false
         default: true
@@ -36,20 +51,35 @@ on:
         default: 'Release'
         type: string
       # PowerShell
-      ps_run:
-        description: 'Run PowerShell Pester tests'
+      ps_windows_runs_on:
+        description: 'JSON array of runner labels for Pester on Windows'
         required: false
-        default: true
-        type: boolean
-      ps_versions:
-        description: 'JSON array of PowerShell versions to test'
+        default: '["windows-latest"]'
+        type: string
+      ps_windows_versions:
+        description: 'JSON array of PS versions for Windows (e.g. ["5.1","7"])'
         required: false
         default: '["5.1","7"]'
         type: string
-      ps_runs_on:
-        description: 'JSON array of runner labels for PowerShell tests'
+      ps_ubuntu_runs_on:
+        description: 'JSON array of runner labels for Pester on Ubuntu (empty to disable)'
         required: false
-        default: '["windows-latest"]'
+        default: '[]'
+        type: string
+      ps_ubuntu_versions:
+        description: 'JSON array of PS versions for Ubuntu (usually ["7"])'
+        required: false
+        default: '["7"]'
+        type: string
+      ps_macos_runs_on:
+        description: 'JSON array of runner labels for Pester on macOS (empty to disable)'
+        required: false
+        default: '[]'
+        type: string
+      ps_macos_versions:
+        description: 'JSON array of PS versions for macOS (usually ["7"])'
+        required: false
+        default: '["7"]'
         type: string
       ps_module_manifest:
         description: 'Path to module .psd1'
@@ -96,52 +126,84 @@ on:
 jobs:
   dotnet-windows:
     name: .NET Windows
-    if: contains(fromJSON(inputs.os_dotnet), 'windows-latest')
+    if: ${{ fromJSON(inputs.dotnet_windows_runs_on)[0] != null }}
     uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
-      os: '["windows-latest"]'
+      os: ${{ inputs.dotnet_windows_runs_on }}
       solution: ${{ inputs.solution }}
-      frameworks: ${{ inputs.dotnet_frameworks_windows }}
+      frameworks: ${{ inputs.dotnet_windows_frameworks }}
       summarize_failures: true
-      enable_codecov: ${{ inputs.enable_codecov }}
+      codecov_enable: ${{ inputs.codecov_enable }}
       build_configuration: ${{ inputs.dotnet_build_configuration }}
     secrets: inherit
 
   dotnet-ubuntu:
     name: .NET Ubuntu
-    if: contains(fromJSON(inputs.os_dotnet), 'ubuntu-latest')
+    if: ${{ fromJSON(inputs.dotnet_ubuntu_runs_on)[0] != null }}
     uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
-      os: '["ubuntu-latest"]'
+      os: ${{ inputs.dotnet_ubuntu_runs_on }}
       solution: ${{ inputs.solution }}
-      frameworks: ${{ inputs.dotnet_frameworks_unix }}
+      frameworks: ${{ inputs.dotnet_ubuntu_frameworks }}
       summarize_failures: true
-      enable_codecov: ${{ inputs.enable_codecov }}
+      codecov_enable: ${{ inputs.codecov_enable }}
       build_configuration: ${{ inputs.dotnet_build_configuration }}
     secrets: inherit
 
   dotnet-macos:
     name: .NET macOS
-    if: contains(fromJSON(inputs.os_dotnet), 'macos-latest')
+    if: ${{ fromJSON(inputs.dotnet_macos_runs_on)[0] != null }}
     uses: EvotecIT/github-actions/.github/workflows/ci-dotnet.yml@master
     with:
-      os: '["macos-latest"]'
+      os: ${{ inputs.dotnet_macos_runs_on }}
       solution: ${{ inputs.solution }}
-      frameworks: ${{ inputs.dotnet_frameworks_unix }}
+      frameworks: ${{ inputs.dotnet_macos_frameworks }}
       summarize_failures: true
-      enable_codecov: ${{ inputs.enable_codecov }}
+      codecov_enable: ${{ inputs.codecov_enable }}
       build_configuration: ${{ inputs.dotnet_build_configuration }}
     secrets: inherit
 
   pester-windows:
     name: PowerShell (Windows)
-    if: ${{ inputs.ps_run }}
+    if: ${{ fromJSON(inputs.ps_windows_runs_on)[0] != null }}
     uses: EvotecIT/github-actions/.github/workflows/ci-powershell.yml@master
     with:
-      runs_on: ${{ inputs.ps_runs_on }}
+      runs_on: ${{ inputs.ps_windows_runs_on }}
       module_manifest: ${{ inputs.ps_module_manifest }}
       solution: ${{ inputs.solution }}
-      ps_versions: ${{ inputs.ps_versions }}
+      ps_versions: ${{ inputs.ps_windows_versions }}
+      test_script: ${{ inputs.ps_test_script }}
+      tests_path: ${{ inputs.ps_tests_path }}
+      empty_tests_behavior: ${{ inputs.ps_empty_tests_behavior }}
+      summarize_failures: true
+      dotnet_version: '8.0.x'
+    secrets: inherit
+
+  pester-ubuntu:
+    name: PowerShell (Ubuntu)
+    if: ${{ fromJSON(inputs.ps_ubuntu_runs_on)[0] != null }}
+    uses: EvotecIT/github-actions/.github/workflows/ci-powershell.yml@master
+    with:
+      runs_on: ${{ inputs.ps_ubuntu_runs_on }}
+      module_manifest: ${{ inputs.ps_module_manifest }}
+      solution: ${{ inputs.solution }}
+      ps_versions: ${{ inputs.ps_ubuntu_versions }}
+      test_script: ${{ inputs.ps_test_script }}
+      tests_path: ${{ inputs.ps_tests_path }}
+      empty_tests_behavior: ${{ inputs.ps_empty_tests_behavior }}
+      summarize_failures: true
+      dotnet_version: '8.0.x'
+    secrets: inherit
+
+  pester-macos:
+    name: PowerShell (macOS)
+    if: ${{ fromJSON(inputs.ps_macos_runs_on)[0] != null }}
+    uses: EvotecIT/github-actions/.github/workflows/ci-powershell.yml@master
+    with:
+      runs_on: ${{ inputs.ps_macos_runs_on }}
+      module_manifest: ${{ inputs.ps_module_manifest }}
+      solution: ${{ inputs.solution }}
+      ps_versions: ${{ inputs.ps_macos_versions }}
       test_script: ${{ inputs.ps_test_script }}
       tests_path: ${{ inputs.ps_tests_path }}
       empty_tests_behavior: ${{ inputs.ps_empty_tests_behavior }}
@@ -158,7 +220,7 @@ jobs:
 
   summary:
     name: Consolidated Test Summary
-    needs: [dotnet-windows, dotnet-ubuntu, dotnet-macos, pester-windows]
+    needs: [dotnet-windows, dotnet-ubuntu, dotnet-macos, pester-windows, pester-ubuntu, pester-macos]
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -196,6 +258,8 @@ jobs:
           res_dotnet_ubuntu:  ${{ needs.dotnet-ubuntu.result }}
           res_dotnet_macos:   ${{ needs.dotnet-macos.result }}
           res_pester_windows: ${{ needs.pester-windows.result }}
+          res_pester_ubuntu:  ${{ needs.pester-ubuntu.result }}
+          res_pester_macos:   ${{ needs.pester-macos.result }}
           summary_comment_tag: evotec-ci-aggregate-summary
           post_pr_comment: ${{ inputs.post_pr_comment }}
 

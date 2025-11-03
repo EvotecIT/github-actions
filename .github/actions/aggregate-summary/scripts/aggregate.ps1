@@ -24,10 +24,12 @@ $tfmMap = {
 
 # Job results (failure/cancelled)
 $results = @{
-    '.NET (Windows)'       = $env:RES_DOTNET_WINDOWS
-    '.NET (Ubuntu)'        = $env:RES_DOTNET_UBUNTU
-    '.NET (macOS)'         = $env:RES_DOTNET_MACOS
-    'PowerShell (Windows)' = $env:RES_PESTER_WINDOWS
+    '.NET (Windows)'        = $env:RES_DOTNET_WINDOWS
+    '.NET (Ubuntu)'         = $env:RES_DOTNET_UBUNTU
+    '.NET (macOS)'          = $env:RES_DOTNET_MACOS
+    'PowerShell (Windows)'  = $env:RES_PESTER_WINDOWS
+    'PowerShell (Ubuntu)'   = $env:RES_PESTER_UBUNTU
+    'PowerShell (macOS)'    = $env:RES_PESTER_MACOS
 }
 foreach ($k in $results.Keys) {
     $v = ($results[$k] ?? '').ToLowerInvariant()
@@ -146,11 +148,27 @@ foreach ($cf in $countFiles) {
                 }
             }
             $fwDisp = & $tfmMap $fw
-            $mx = ("{0} | SDK {1} | {2}" -f $os, $sdk, $fwDisp) -replace '\|', '\\|'
+            # Decide whether SDK info is redundant with the TFM (e.g., SDK 8.x with Net8.0)
+            $showSdk = $true
+            try {
+                $sdkMajor = ($sdk -split '\.')[0]
+                $mNet = [regex]::Match($fw, '^net(\d+)(?:\.\d+)?$')
+                $mFx  = [regex]::Match($fw, '^net(\d)(\d)(\d)$')
+                if ($mNet.Success) {
+                    $tfmMajor = $mNet.Groups[1].Value
+                    if ($tfmMajor -eq $sdkMajor) { $showSdk = $false }
+                } elseif ($mFx.Success) {
+                    # For .NET Framework (e.g., net472), keep SDK visible as it differs from modern SDKs
+                    $showSdk = $true
+                }
+            } catch { $showSdk = $true }
+            $mx = if ($showSdk) { ("{0} | SDK {1} | {2}" -f $os, $sdk, $fwDisp) } else { ("{0} | {1}" -f $os, $fwDisp) }
+            $mx = $mx -replace '\|', '\\|'
             $rows += [pscustomobject]@{ Job = '.NET'; Matrix = $mx; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
         } elseif ($j.kind -eq 'pester') {
             $psv = "$($j.ps)"; if (-not $psv) { $psv = 'unknown' }
-            $mx = ("Windows | PS {0}" -f $psv) -replace '\|', '\\|'
+            $osv = "$($j.os)"; if (-not $osv) { $osv = 'Windows' }
+            $mx = ("{0} | PS {1}" -f $osv, $psv) -replace '\|', '\\|'
             $rows += [pscustomobject]@{ Job = 'PowerShell'; Matrix = $mx; Passed = $j.passed; Failed = $j.failed; Skipped = $j.skipped; Total = $j.total }
             if ($j.total -eq 0 -and $j.PSObject.Properties.Name -contains 'note' -and $j.note) {
                 $pesterNoteRows += [pscustomobject]@{ Version = $psv; Note = [string]$j.note }

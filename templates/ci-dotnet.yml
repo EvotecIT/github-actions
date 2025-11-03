@@ -17,6 +17,5 @@ jobs:
       build_configuration: 'Debug'
       test_verbosity: 'minimal'
       summarize_failures: true
-      enable_codecov: false
+      codecov_enable: false
     secrets: inherit
-

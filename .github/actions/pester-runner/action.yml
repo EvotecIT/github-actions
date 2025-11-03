@@ -124,7 +124,7 @@ runs:
         }
         $obj = [ordered]@{
           kind   = 'pester'
-          os     = 'Windows'
+          os     = "$env:RUNNER_OS"
           ps     = '${{ inputs.psver }}'
           total  = $total
           passed = $passed
@@ -133,7 +133,8 @@ runs:
         }
         $outDir = Join-Path $PWD 'artifacts/Counts'
         New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-        $jsonPath = Join-Path $outDir ("pester-${{ inputs.psver }}.json")
+        $osShort = ($env:RUNNER_OS -replace '[^A-Za-z0-9.-]','_')
+        $jsonPath = Join-Path $outDir ("pester-$osShort-${{ inputs.psver }}.json")
         ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
 
     - name: No tests found policy
@@ -147,7 +148,8 @@ runs:
         $obj = [ordered]@{ kind='pester'; os='Windows'; ps='${{ inputs.psver }}'; total=0; passed=0; failed=0; skipped=0; note=$msg }
         $outDir = Join-Path $PWD 'artifacts/Counts'
         New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-        $jsonPath = Join-Path $outDir ("pester-${{ inputs.psver }}.json")
+        $osShort = ($env:RUNNER_OS -replace '[^A-Za-z0-9.-]','_')
+        $jsonPath = Join-Path $outDir ("pester-$osShort-${{ inputs.psver }}.json")
         ($obj | ConvertTo-Json -Depth 4) | Out-File -FilePath $jsonPath -Encoding utf8 -Force
 
         switch (($env:EMPTY_BEHAVIOR ?? 'skip').ToLowerInvariant()) {
@@ -155,4 +157,3 @@ runs:
           'warn' { if ($env:GITHUB_STEP_SUMMARY) { "### PowerShell (Pester)`n- ⚠️ $msg`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 } }
           Default { if ($env:GITHUB_STEP_SUMMARY) { "### PowerShell (Pester)`n- ℹ️ $msg`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 } }
         }
-

@@ -52,7 +52,7 @@ jobs:
       # ps_versions: '["5.1","7"]'
       # dotnet_versions: '["8.0.x"]'
       # runs_on: '["windows-latest"]'
-      # enable_codecov: false
+      # codecov_enable: false
       # Post failing-tests summary as a comment (off by default):
       # post_summary_issue: true
       # post_summary_destination: 'issue'   # or 'pr' to post on the PR thread

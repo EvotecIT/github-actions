@@ -21,6 +21,14 @@ inputs:
     description: "Pester Windows job result"
     required: false
     default: ''
+  res_pester_ubuntu:
+    description: "Pester Ubuntu job result"
+    required: false
+    default: ''
+  res_pester_macos:
+    description: "Pester macOS job result"
+    required: false
+    default: ''
   summary_comment_tag:
     description: "Marker to make the PR comment sticky"
     required: false
@@ -47,6 +55,8 @@ runs:
         RES_DOTNET_UBUNTU:  ${{ inputs.res_dotnet_ubuntu }}
         RES_DOTNET_MACOS:   ${{ inputs.res_dotnet_macos }}
         RES_PESTER_WINDOWS: ${{ inputs.res_pester_windows }}
+        RES_PESTER_UBUNTU:  ${{ inputs.res_pester_ubuntu }}
+        RES_PESTER_MACOS:   ${{ inputs.res_pester_macos }}
       run: |
         & "${{ github.action_path }}/scripts/aggregate.ps1" -ArtifactsRoot "${{ inputs.artifacts_path }}" -SummaryMarker "${{ inputs.summary_comment_tag }}"
 
@@ -74,4 +84,3 @@ runs:
           } else {
             await github.rest.issues.createComment({ owner, repo, issue_number, body });
           }
-
