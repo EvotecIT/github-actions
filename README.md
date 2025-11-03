@@ -46,13 +46,13 @@ Quick start (copy one file)
 
 Templates (examples)
 --------------------
-- `templates/unified-ci-windows.yml` — Windows public runners, .NET + PowerShell.
-- `templates/unified-ci-multi-os.yml` — Simple three-job layout (Windows/Ubuntu/macOS) without matrix.
-- `templates/unified-ci-selfhosted.yml` — Self-hosted Windows labels.
-- `templates/unified-ci-powershell-only.yml` — PowerShell-only with PSD1 refresh.
-- `templates/unified-ci-dotnet-only.yml` — .NET-only with multi-SDK + Codecov.
-- `templates/unified-ci-pr-claude.yml` — PR-only with Claude review enabled.
-- `templates/unified-ci-pr-summary-comment.yml` — PR sticky failing-tests comment (no Issues needed).
+- `templates/unified-ci-windows.yml` - Windows public runners, .NET + PowerShell.
+- `templates/unified-ci-multi-os.yml` - Simple three-job layout (Windows/Ubuntu/macOS) without matrix.
+- `templates/unified-ci-selfhosted.yml` - Self-hosted Windows labels.
+- `templates/unified-ci-powershell-only.yml` - PowerShell-only with PSD1 refresh.
+- `templates/unified-ci-dotnet-only.yml` - .NET-only with multi-SDK + Codecov.
+- `templates/unified-ci-pr-claude.yml` - PR-only with Claude review enabled.
+- `templates/unified-ci-pr-summary-comment.yml` - PR sticky failing-tests comment (no Issues needed).
 
 Key inputs (high level)
 -----------------------
