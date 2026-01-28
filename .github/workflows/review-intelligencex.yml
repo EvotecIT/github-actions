@@ -221,6 +221,53 @@ on:
         default: '[REDACTED]'
         type: string
 
+      # Cleanup (PR/Issue metadata)
+      cleanup_enabled:
+        description: 'Enable cleanup for PR/issue metadata'
+        required: false
+        default: false
+        type: boolean
+      cleanup_mode:
+        description: 'Cleanup mode: comment, edit, hybrid'
+        required: false
+        default: 'comment'
+        type: string
+      cleanup_scope:
+        description: 'Cleanup scope: pr, issue, both'
+        required: false
+        default: 'pr'
+        type: string
+      cleanup_require_label:
+        description: 'Require label to trigger cleanup (optional)'
+        required: false
+        default: ''
+        type: string
+      cleanup_min_confidence:
+        description: 'Minimum confidence for auto-edit (0-1)'
+        required: false
+        default: 0.85
+        type: number
+      cleanup_allowed_edits:
+        description: 'Comma-separated allowed edits'
+        required: false
+        default: 'formatting,grammar,title,sections'
+        type: string
+      cleanup_template:
+        description: 'Inline cleanup template'
+        required: false
+        default: ''
+        type: string
+      cleanup_template_path:
+        description: 'Path to cleanup template'
+        required: false
+        default: ''
+        type: string
+      cleanup_post_edit_comment:
+        description: 'Post comment after auto-edit'
+        required: false
+        default: true
+        type: boolean
+
       # Context enrichment
       include_issue_comments:
         description: 'Include PR issue comments in prompt'
@@ -464,6 +511,16 @@ jobs:
           INPUT_REDACTION_PATTERNS: ${{ inputs.redaction_patterns }}
           INPUT_REDACTION_REPLACEMENT: ${{ inputs.redaction_replacement }}
 
+          INPUT_CLEANUP_ENABLED: ${{ inputs.cleanup_enabled }}
+          INPUT_CLEANUP_MODE: ${{ inputs.cleanup_mode }}
+          INPUT_CLEANUP_SCOPE: ${{ inputs.cleanup_scope }}
+          INPUT_CLEANUP_REQUIRE_LABEL: ${{ inputs.cleanup_require_label }}
+          INPUT_CLEANUP_MIN_CONFIDENCE: ${{ inputs.cleanup_min_confidence }}
+          INPUT_CLEANUP_ALLOWED_EDITS: ${{ inputs.cleanup_allowed_edits }}
+          INPUT_CLEANUP_TEMPLATE: ${{ inputs.cleanup_template }}
+          INPUT_CLEANUP_TEMPLATE_PATH: ${{ inputs.cleanup_template_path }}
+          INPUT_CLEANUP_POST_EDIT_COMMENT: ${{ inputs.cleanup_post_edit_comment }}
+
           INPUT_INCLUDE_ISSUE_COMMENTS: ${{ inputs.include_issue_comments }}
           INPUT_INCLUDE_REVIEW_COMMENTS: ${{ inputs.include_review_comments }}
           INPUT_MAX_COMMENT_CHARS: ${{ inputs.max_comment_chars }}
@@ -539,6 +596,16 @@ jobs:
           INPUT_REDACT_PII: ${{ inputs.redact_pii }}
           INPUT_REDACTION_PATTERNS: ${{ inputs.redaction_patterns }}
           INPUT_REDACTION_REPLACEMENT: ${{ inputs.redaction_replacement }}
+
+          INPUT_CLEANUP_ENABLED: ${{ inputs.cleanup_enabled }}
+          INPUT_CLEANUP_MODE: ${{ inputs.cleanup_mode }}
+          INPUT_CLEANUP_SCOPE: ${{ inputs.cleanup_scope }}
+          INPUT_CLEANUP_REQUIRE_LABEL: ${{ inputs.cleanup_require_label }}
+          INPUT_CLEANUP_MIN_CONFIDENCE: ${{ inputs.cleanup_min_confidence }}
+          INPUT_CLEANUP_ALLOWED_EDITS: ${{ inputs.cleanup_allowed_edits }}
+          INPUT_CLEANUP_TEMPLATE: ${{ inputs.cleanup_template }}
+          INPUT_CLEANUP_TEMPLATE_PATH: ${{ inputs.cleanup_template_path }}
+          INPUT_CLEANUP_POST_EDIT_COMMENT: ${{ inputs.cleanup_post_edit_comment }}
 
           INPUT_INCLUDE_ISSUE_COMMENTS: ${{ inputs.include_issue_comments }}
           INPUT_INCLUDE_REVIEW_COMMENTS: ${{ inputs.include_review_comments }}
@@ -621,6 +688,16 @@ jobs:
           INPUT_REDACT_PII: ${{ inputs.redact_pii }}
           INPUT_REDACTION_PATTERNS: ${{ inputs.redaction_patterns }}
           INPUT_REDACTION_REPLACEMENT: ${{ inputs.redaction_replacement }}
+
+          INPUT_CLEANUP_ENABLED: ${{ inputs.cleanup_enabled }}
+          INPUT_CLEANUP_MODE: ${{ inputs.cleanup_mode }}
+          INPUT_CLEANUP_SCOPE: ${{ inputs.cleanup_scope }}
+          INPUT_CLEANUP_REQUIRE_LABEL: ${{ inputs.cleanup_require_label }}
+          INPUT_CLEANUP_MIN_CONFIDENCE: ${{ inputs.cleanup_min_confidence }}
+          INPUT_CLEANUP_ALLOWED_EDITS: ${{ inputs.cleanup_allowed_edits }}
+          INPUT_CLEANUP_TEMPLATE: ${{ inputs.cleanup_template }}
+          INPUT_CLEANUP_TEMPLATE_PATH: ${{ inputs.cleanup_template_path }}
+          INPUT_CLEANUP_POST_EDIT_COMMENT: ${{ inputs.cleanup_post_edit_comment }}
 
           INPUT_INCLUDE_ISSUE_COMMENTS: ${{ inputs.include_issue_comments }}
           INPUT_INCLUDE_REVIEW_COMMENTS: ${{ inputs.include_review_comments }}
