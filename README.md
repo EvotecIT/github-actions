@@ -136,6 +136,7 @@ Secrets
 - PowerShell Gallery: `PSGALLERY_API_KEY` for module release.
 - Claude review: `CLAUDE_CODE_OAUTH_TOKEN`.
 - IntelligenceX native auth: `INTELLIGENCEX_AUTH_B64` (base64 auth bundle from `IntelligenceX.AuthTool export`).
+  - For reusable workflows, use `secrets: inherit` in the caller (do not pass `GITHUB_TOKEN` explicitly).
 
 Migration from per-repo YAML
 ----------------------------

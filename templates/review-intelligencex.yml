@@ -48,6 +48,4 @@ jobs:
       # include_review_comments: true
       # include_related_prs: true
       # related_prs_query: 'repo:owner/repo is:pr is:open label:"bug"'
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      INTELLIGENCEX_AUTH_B64: ${{ secrets.INTELLIGENCEX_AUTH_B64 }}
+    secrets: inherit

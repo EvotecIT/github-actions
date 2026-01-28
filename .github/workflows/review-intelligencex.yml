@@ -316,8 +316,6 @@ on:
         type: boolean
 
     secrets:
-      GITHUB_TOKEN:
-        required: true
       INTELLIGENCEX_AUTH_B64:
         required: false
 
