@@ -466,8 +466,8 @@ jobs:
         run: |
           dotnet run --project IntelligenceX.Reviewer/IntelligenceX.Reviewer.csproj -c Release
 
-      - name: Run IntelligenceX.Reviewer (release)
-        if: ${{ inputs.reviewer_source == 'release' }}
+      - name: Run IntelligenceX.Reviewer (release, unix)
+        if: ${{ inputs.reviewer_source == 'release' && runner.os != 'Windows' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INTELLIGENCEX_AUTH_B64: ${{ secrets.INTELLIGENCEX_AUTH_B64 }}
@@ -537,4 +537,88 @@ jobs:
           COPILOT_AUTO_INSTALL_PRERELEASE: ${{ inputs.copilot_auto_install_prerelease }}
         shell: bash
         run: |
-          dotnet reviewer-release/IntelligenceX.Reviewer.dll
+          set -euo pipefail
+          reviewer_dll=$(find reviewer-release -type f -name IntelligenceX.Reviewer.dll | head -n 1)
+          if [ -z "$reviewer_dll" ]; then
+            echo "Reviewer DLL not found under reviewer-release."
+            exit 1
+          fi
+          dotnet "$reviewer_dll"
+
+      - name: Run IntelligenceX.Reviewer (release, windows)
+        if: ${{ inputs.reviewer_source == 'release' && runner.os == 'Windows' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INTELLIGENCEX_AUTH_B64: ${{ secrets.INTELLIGENCEX_AUTH_B64 }}
+
+          INPUT_PROVIDER: ${{ inputs.provider }}
+          INPUT_MODEL: ${{ inputs.model }}
+          INPUT_OPENAI_MODEL: ${{ inputs.openai_model }}
+          INPUT_COPILOT_MODEL: ${{ inputs.copilot_model }}
+          INPUT_OPENAI_TRANSPORT: ${{ inputs.openai_transport }}
+          INPUT_REPO: ${{ inputs.repo }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+
+          INPUT_PROFILE: ${{ inputs.profile }}
+          INPUT_STRICTNESS: ${{ inputs.strictness }}
+          INPUT_TONE: ${{ inputs.tone }}
+          INPUT_FOCUS: ${{ inputs.focus }}
+
+          INPUT_LENGTH: ${{ inputs.length }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_PERSONA: ${{ inputs.persona }}
+          INPUT_NOTES: ${{ inputs.notes }}
+
+          INPUT_COMMENT_MODE: ${{ inputs.comment_mode }}
+          INPUT_PROGRESS_UPDATES: ${{ inputs.progress_updates }}
+          INPUT_PROGRESS_UPDATE_SECONDS: ${{ inputs.progress_update_seconds }}
+          INPUT_PROGRESS_PREVIEW_CHARS: ${{ inputs.progress_preview_chars }}
+
+          INPUT_MAX_FILES: ${{ inputs.max_files }}
+          INPUT_MAX_PATCH_CHARS: ${{ inputs.max_patch_chars }}
+          INPUT_MAX_INLINE_COMMENTS: ${{ inputs.max_inline_comments }}
+          INPUT_SEVERITY_THRESHOLD: ${{ inputs.severity_threshold }}
+
+          INPUT_WAIT_SECONDS: ${{ inputs.wait_seconds }}
+          INPUT_IDLE_SECONDS: ${{ inputs.idle_seconds }}
+
+          INPUT_SKIP_DRAFT: ${{ inputs.skip_draft }}
+          INPUT_SKIP_TITLES: ${{ inputs.skip_titles }}
+          INPUT_SKIP_LABELS: ${{ inputs.skip_labels }}
+          INPUT_SKIP_PATHS: ${{ inputs.skip_paths }}
+
+          INPUT_REDACT_PII: ${{ inputs.redact_pii }}
+          INPUT_REDACTION_PATTERNS: ${{ inputs.redaction_patterns }}
+          INPUT_REDACTION_REPLACEMENT: ${{ inputs.redaction_replacement }}
+
+          INPUT_INCLUDE_ISSUE_COMMENTS: ${{ inputs.include_issue_comments }}
+          INPUT_INCLUDE_REVIEW_COMMENTS: ${{ inputs.include_review_comments }}
+          INPUT_MAX_COMMENT_CHARS: ${{ inputs.max_comment_chars }}
+          INPUT_MAX_COMMENTS: ${{ inputs.max_comments }}
+          INPUT_INCLUDE_RELATED_PRS: ${{ inputs.include_related_prs }}
+          INPUT_RELATED_PRS_QUERY: ${{ inputs.related_prs_query }}
+          INPUT_MAX_RELATED_PRS: ${{ inputs.max_related_prs }}
+
+          INPUT_PROMPT_TEMPLATE_PATH: ${{ inputs.prompt_template_path }}
+          INPUT_SUMMARY_TEMPLATE_PATH: ${{ inputs.summary_template_path }}
+
+          REVIEW_CONFIG_PATH: ${{ inputs.review_config_path }}
+
+          CODEX_APP_SERVER_PATH: ${{ inputs.codex_path }}
+          CODEX_APP_SERVER_ARGS: ${{ inputs.codex_args }}
+          CODEX_APP_SERVER_CWD: ${{ inputs.codex_cwd }}
+
+          COPILOT_CLI_PATH: ${{ inputs.copilot_cli_path }}
+          COPILOT_CLI_URL: ${{ inputs.copilot_cli_url }}
+          COPILOT_CLI_WORKDIR: ${{ inputs.copilot_cli_workdir }}
+          COPILOT_AUTO_INSTALL: ${{ inputs.copilot_auto_install }}
+          COPILOT_AUTO_INSTALL_METHOD: ${{ inputs.copilot_auto_install_method }}
+          COPILOT_AUTO_INSTALL_PRERELEASE: ${{ inputs.copilot_auto_install_prerelease }}
+        shell: pwsh
+        run: |
+          $reviewer = Get-ChildItem -Path reviewer-release -Recurse -Filter IntelligenceX.Reviewer.dll | Select-Object -First 1
+          if (-not $reviewer) {
+            Write-Error "Reviewer DLL not found under reviewer-release."
+            exit 1
+          }
+          dotnet $reviewer.FullName
