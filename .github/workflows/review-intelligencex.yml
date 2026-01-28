@@ -79,6 +79,16 @@ on:
         required: false
         default: 'balanced'
         type: string
+      style:
+        description: 'Review style preset: direct, friendly, funny, colorful, formal'
+        required: false
+        default: ''
+        type: string
+      output_style:
+        description: 'Output style preset (e.g., claude)'
+        required: false
+        default: ''
+        type: string
       strictness:
         description: 'Strictness label passed to prompt'
         required: false
@@ -318,6 +328,10 @@ on:
     secrets:
       INTELLIGENCEX_AUTH_B64:
         required: false
+      INTELLIGENCEX_GITHUB_APP_ID:
+        required: false
+      INTELLIGENCEX_GITHUB_APP_PRIVATE_KEY:
+        required: false
 
 jobs:
   review:
@@ -336,6 +350,14 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Create GitHub App token
+        id: app_token
+        if: ${{ secrets.INTELLIGENCEX_GITHUB_APP_ID != '' && secrets.INTELLIGENCEX_GITHUB_APP_PRIVATE_KEY != '' }}
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.INTELLIGENCEX_GITHUB_APP_ID }}
+          private-key: ${{ secrets.INTELLIGENCEX_GITHUB_APP_PRIVATE_KEY }}
 
       - name: Resolve reviewer release
         if: ${{ inputs.reviewer_source == 'release' && inputs.reviewer_release_url == '' }}
@@ -397,6 +419,7 @@ jobs:
         if: ${{ inputs.reviewer_source == 'source' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INTELLIGENCEX_GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
           INTELLIGENCEX_AUTH_B64: ${{ secrets.INTELLIGENCEX_AUTH_B64 }}
 
           INPUT_PROVIDER: ${{ inputs.provider }}
@@ -408,6 +431,8 @@ jobs:
           INPUT_PR_NUMBER: ${{ inputs.pr_number }}
 
           INPUT_PROFILE: ${{ inputs.profile }}
+          INPUT_STYLE: ${{ inputs.style }}
+          INPUT_OUTPUT_STYLE: ${{ inputs.output_style }}
           INPUT_STRICTNESS: ${{ inputs.strictness }}
           INPUT_TONE: ${{ inputs.tone }}
           INPUT_FOCUS: ${{ inputs.focus }}
@@ -470,6 +495,7 @@ jobs:
         if: ${{ inputs.reviewer_source == 'release' && runner.os != 'Windows' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INTELLIGENCEX_GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
           INTELLIGENCEX_AUTH_B64: ${{ secrets.INTELLIGENCEX_AUTH_B64 }}
 
           INPUT_PROVIDER: ${{ inputs.provider }}
@@ -481,6 +507,8 @@ jobs:
           INPUT_PR_NUMBER: ${{ inputs.pr_number }}
 
           INPUT_PROFILE: ${{ inputs.profile }}
+          INPUT_STYLE: ${{ inputs.style }}
+          INPUT_OUTPUT_STYLE: ${{ inputs.output_style }}
           INPUT_STRICTNESS: ${{ inputs.strictness }}
           INPUT_TONE: ${{ inputs.tone }}
           INPUT_FOCUS: ${{ inputs.focus }}
@@ -549,6 +577,7 @@ jobs:
         if: ${{ inputs.reviewer_source == 'release' && runner.os == 'Windows' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INTELLIGENCEX_GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
           INTELLIGENCEX_AUTH_B64: ${{ secrets.INTELLIGENCEX_AUTH_B64 }}
 
           INPUT_PROVIDER: ${{ inputs.provider }}
@@ -560,6 +589,8 @@ jobs:
           INPUT_PR_NUMBER: ${{ inputs.pr_number }}
 
           INPUT_PROFILE: ${{ inputs.profile }}
+          INPUT_STYLE: ${{ inputs.style }}
+          INPUT_OUTPUT_STYLE: ${{ inputs.output_style }}
           INPUT_STRICTNESS: ${{ inputs.strictness }}
           INPUT_TONE: ${{ inputs.tone }}
           INPUT_FOCUS: ${{ inputs.focus }}
