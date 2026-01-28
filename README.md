@@ -95,6 +95,9 @@ Key inputs (high level)
   - Runs your build script and calls `Publish-Module` from `publish_from_path`.
 
 - IntelligenceX Review (`.github/workflows/review-intelligencex.yml`):
+  - `reviewer_source` (`source` | `release`) with optional `reviewer_release_repo`, `reviewer_release_tag`,
+    `reviewer_release_asset`, or `reviewer_release_url`.
+  - Default `reviewer_release_repo` is `EvotecIT/github-actions` to support private reviewer source repos.
   - `provider` (`openai` | `copilot`) and `model` to select the backend.
   - `openai_transport` (`native` | `appserver`) plus optional `openai_model` / `copilot_model`.
   - `profile`, `strictness`, `tone`, `focus` to tune the prompt.

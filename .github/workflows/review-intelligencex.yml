@@ -19,6 +19,33 @@ on:
         default: 0
         type: number
 
+      # Reviewer source
+      reviewer_source:
+        description: 'Reviewer source: source or release'
+        required: false
+        default: 'source'
+        type: string
+      reviewer_release_repo:
+        description: 'Release repo (owner/name) containing reviewer assets'
+        required: false
+        default: 'EvotecIT/github-actions'
+        type: string
+      reviewer_release_tag:
+        description: 'Release tag (or latest)'
+        required: false
+        default: 'latest'
+        type: string
+      reviewer_release_asset:
+        description: 'Asset name (optional, defaults by OS)'
+        required: false
+        default: ''
+        type: string
+      reviewer_release_url:
+        description: 'Direct asset URL (optional, overrides repo/tag/asset)'
+        required: false
+        default: ''
+        type: string
+
       # Provider/model
       provider:
         description: 'Review provider: openai or copilot'
@@ -312,11 +339,64 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Resolve reviewer release
+        if: ${{ inputs.reviewer_source == 'release' && inputs.reviewer_release_url == '' }}
+        id: reviewer_release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const repoInput = '${{ inputs.reviewer_release_repo }}';
+            const parts = repoInput.split('/');
+            if (parts.length !== 2) {
+              core.setFailed(`Invalid reviewer_release_repo: ${repoInput}`);
+              return;
+            }
+            const [owner, repo] = parts;
+            const tag = '${{ inputs.reviewer_release_tag }}';
+            const os = process.env.RUNNER_OS;
+            const defaultName = os === 'Windows'
+              ? 'IntelligenceX.Reviewer-win-x64.zip'
+              : os === 'macOS'
+                ? 'IntelligenceX.Reviewer-osx-x64.zip'
+                : 'IntelligenceX.Reviewer-linux-x64.zip';
+            const assetName = '${{ inputs.reviewer_release_asset }}' || defaultName;
+            const release = tag && tag !== 'latest'
+              ? await github.rest.repos.getReleaseByTag({ owner, repo, tag })
+              : await github.rest.repos.getLatestRelease({ owner, repo });
+            const asset = release.data.assets.find(a => a.name === assetName);
+            if (!asset) {
+              core.setFailed(`Asset not found: ${assetName}`);
+              return;
+            }
+            core.setOutput('asset_url', asset.browser_download_url);
+
+      - name: Download reviewer (unix)
+        if: ${{ inputs.reviewer_source == 'release' && runner.os != 'Windows' }}
+        env:
+          REVIEWER_ASSET_URL: ${{ inputs.reviewer_release_url != '' && inputs.reviewer_release_url || steps.reviewer_release.outputs.asset_url }}
+        shell: bash
+        run: |
+          mkdir -p reviewer-release
+          curl -L "$REVIEWER_ASSET_URL" -o reviewer-release/reviewer.zip
+          unzip -o reviewer-release/reviewer.zip -d reviewer-release
+
+      - name: Download reviewer (windows)
+        if: ${{ inputs.reviewer_source == 'release' && runner.os == 'Windows' }}
+        env:
+          REVIEWER_ASSET_URL: ${{ inputs.reviewer_release_url != '' && inputs.reviewer_release_url || steps.reviewer_release.outputs.asset_url }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path reviewer-release -Force | Out-Null
+          Invoke-WebRequest -Uri $env:REVIEWER_ASSET_URL -OutFile reviewer-release/reviewer.zip
+          Expand-Archive -Path reviewer-release/reviewer.zip -DestinationPath reviewer-release -Force
+
       - name: Build IntelligenceX.Reviewer
+        if: ${{ inputs.reviewer_source == 'source' }}
         shell: bash
         run: dotnet build IntelligenceX.Reviewer/IntelligenceX.Reviewer.csproj -c Release
 
-      - name: Run IntelligenceX.Reviewer
+      - name: Run IntelligenceX.Reviewer (source)
+        if: ${{ inputs.reviewer_source == 'source' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INTELLIGENCEX_AUTH_B64: ${{ secrets.INTELLIGENCEX_AUTH_B64 }}
@@ -387,3 +467,76 @@ jobs:
         shell: bash
         run: |
           dotnet run --project IntelligenceX.Reviewer/IntelligenceX.Reviewer.csproj -c Release
+
+      - name: Run IntelligenceX.Reviewer (release)
+        if: ${{ inputs.reviewer_source == 'release' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INTELLIGENCEX_AUTH_B64: ${{ secrets.INTELLIGENCEX_AUTH_B64 }}
+
+          INPUT_PROVIDER: ${{ inputs.provider }}
+          INPUT_MODEL: ${{ inputs.model }}
+          INPUT_OPENAI_MODEL: ${{ inputs.openai_model }}
+          INPUT_COPILOT_MODEL: ${{ inputs.copilot_model }}
+          INPUT_OPENAI_TRANSPORT: ${{ inputs.openai_transport }}
+          INPUT_REPO: ${{ inputs.repo }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+
+          INPUT_PROFILE: ${{ inputs.profile }}
+          INPUT_STRICTNESS: ${{ inputs.strictness }}
+          INPUT_TONE: ${{ inputs.tone }}
+          INPUT_FOCUS: ${{ inputs.focus }}
+
+          INPUT_LENGTH: ${{ inputs.length }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_PERSONA: ${{ inputs.persona }}
+          INPUT_NOTES: ${{ inputs.notes }}
+
+          INPUT_COMMENT_MODE: ${{ inputs.comment_mode }}
+          INPUT_PROGRESS_UPDATES: ${{ inputs.progress_updates }}
+          INPUT_PROGRESS_UPDATE_SECONDS: ${{ inputs.progress_update_seconds }}
+          INPUT_PROGRESS_PREVIEW_CHARS: ${{ inputs.progress_preview_chars }}
+
+          INPUT_MAX_FILES: ${{ inputs.max_files }}
+          INPUT_MAX_PATCH_CHARS: ${{ inputs.max_patch_chars }}
+          INPUT_MAX_INLINE_COMMENTS: ${{ inputs.max_inline_comments }}
+          INPUT_SEVERITY_THRESHOLD: ${{ inputs.severity_threshold }}
+
+          INPUT_WAIT_SECONDS: ${{ inputs.wait_seconds }}
+          INPUT_IDLE_SECONDS: ${{ inputs.idle_seconds }}
+
+          INPUT_SKIP_DRAFT: ${{ inputs.skip_draft }}
+          INPUT_SKIP_TITLES: ${{ inputs.skip_titles }}
+          INPUT_SKIP_LABELS: ${{ inputs.skip_labels }}
+          INPUT_SKIP_PATHS: ${{ inputs.skip_paths }}
+
+          INPUT_REDACT_PII: ${{ inputs.redact_pii }}
+          INPUT_REDACTION_PATTERNS: ${{ inputs.redaction_patterns }}
+          INPUT_REDACTION_REPLACEMENT: ${{ inputs.redaction_replacement }}
+
+          INPUT_INCLUDE_ISSUE_COMMENTS: ${{ inputs.include_issue_comments }}
+          INPUT_INCLUDE_REVIEW_COMMENTS: ${{ inputs.include_review_comments }}
+          INPUT_MAX_COMMENT_CHARS: ${{ inputs.max_comment_chars }}
+          INPUT_MAX_COMMENTS: ${{ inputs.max_comments }}
+          INPUT_INCLUDE_RELATED_PRS: ${{ inputs.include_related_prs }}
+          INPUT_RELATED_PRS_QUERY: ${{ inputs.related_prs_query }}
+          INPUT_MAX_RELATED_PRS: ${{ inputs.max_related_prs }}
+
+          INPUT_PROMPT_TEMPLATE_PATH: ${{ inputs.prompt_template_path }}
+          INPUT_SUMMARY_TEMPLATE_PATH: ${{ inputs.summary_template_path }}
+
+          REVIEW_CONFIG_PATH: ${{ inputs.review_config_path }}
+
+          CODEX_APP_SERVER_PATH: ${{ inputs.codex_path }}
+          CODEX_APP_SERVER_ARGS: ${{ inputs.codex_args }}
+          CODEX_APP_SERVER_CWD: ${{ inputs.codex_cwd }}
+
+          COPILOT_CLI_PATH: ${{ inputs.copilot_cli_path }}
+          COPILOT_CLI_URL: ${{ inputs.copilot_cli_url }}
+          COPILOT_CLI_WORKDIR: ${{ inputs.copilot_cli_workdir }}
+          COPILOT_AUTO_INSTALL: ${{ inputs.copilot_auto_install }}
+          COPILOT_AUTO_INSTALL_METHOD: ${{ inputs.copilot_auto_install_method }}
+          COPILOT_AUTO_INSTALL_PRERELEASE: ${{ inputs.copilot_auto_install_prerelease }}
+        shell: bash
+        run: |
+          dotnet reviewer-release/IntelligenceX.Reviewer.dll
