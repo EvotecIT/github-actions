@@ -1,0 +1,389 @@
+name: IntelligenceX Review
+
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: 'JSON array of runner labels'
+        required: false
+        default: '["ubuntu-latest"]'
+        type: string
+      repo:
+        description: 'Repository (owner/name) for workflow_dispatch or external calls'
+        required: false
+        default: ''
+        type: string
+      pr_number:
+        description: 'Pull request number for workflow_dispatch or external calls'
+        required: false
+        default: 0
+        type: number
+
+      # Provider/model
+      provider:
+        description: 'Review provider: openai or copilot'
+        required: false
+        default: 'openai'
+        type: string
+      model:
+        description: 'Model id (provider-specific)'
+        required: false
+        default: 'gpt-5.2-codex'
+        type: string
+      openai_model:
+        description: 'OpenAI model id (overrides model when provider=openai)'
+        required: false
+        default: ''
+        type: string
+      copilot_model:
+        description: 'Copilot model id (overrides model when provider=copilot)'
+        required: false
+        default: ''
+        type: string
+      openai_transport:
+        description: 'OpenAI transport: native or appserver'
+        required: false
+        default: 'native'
+        type: string
+
+      # Prompt behavior
+      profile:
+        description: 'Prompt profile: picky, balanced, highlevel, security, performance, tests'
+        required: false
+        default: 'balanced'
+        type: string
+      strictness:
+        description: 'Strictness label passed to prompt'
+        required: false
+        default: ''
+        type: string
+      tone:
+        description: 'Tone label passed to prompt'
+        required: false
+        default: ''
+        type: string
+      focus:
+        description: 'Comma-separated focus areas'
+        required: false
+        default: ''
+        type: string
+
+      length:
+        description: 'Review length: short, medium, long'
+        required: false
+        default: 'long'
+        type: string
+      mode:
+        description: 'Review mode (summary, hybrid, inline, etc.)'
+        required: false
+        default: 'hybrid'
+        type: string
+      persona:
+        description: 'Persona text'
+        required: false
+        default: ''
+        type: string
+      notes:
+        description: 'Additional prompt notes'
+        required: false
+        default: ''
+        type: string
+
+      # Progress comment behavior
+      comment_mode:
+        description: 'sticky or fresh'
+        required: false
+        default: 'sticky'
+        type: string
+      progress_updates:
+        description: 'Enable progress updates'
+        required: false
+        default: true
+        type: boolean
+      progress_update_seconds:
+        description: 'Progress update interval (seconds)'
+        required: false
+        default: 30
+        type: number
+      progress_preview_chars:
+        description: 'Max chars to show in preliminary analysis during progress'
+        required: false
+        default: 4000
+        type: number
+
+      # Limits
+      max_files:
+        description: 'Max files to review'
+        required: false
+        default: 20
+        type: number
+      max_patch_chars:
+        description: 'Max patch chars per file'
+        required: false
+        default: 4000
+        type: number
+      max_inline_comments:
+        description: 'Max inline comments'
+        required: false
+        default: 10
+        type: number
+      severity_threshold:
+        description: 'Only include issues >= severity (low/medium/high/critical)'
+        required: false
+        default: ''
+        type: string
+
+      # Wait/idle
+      wait_seconds:
+        description: 'Max wait for completion'
+        required: false
+        default: 60
+        type: number
+      idle_seconds:
+        description: 'Idle timeout for streaming'
+        required: false
+        default: 5
+        type: number
+
+      # Skip rules
+      skip_draft:
+        description: 'Skip draft PRs'
+        required: false
+        default: true
+        type: boolean
+      skip_titles:
+        description: 'Comma-separated title substrings to skip'
+        required: false
+        default: '[WIP],[skip-review]'
+        type: string
+      skip_labels:
+        description: 'Comma-separated labels to skip'
+        required: false
+        default: ''
+        type: string
+      skip_paths:
+        description: 'Comma-separated glob patterns; if all files match, skip'
+        required: false
+        default: ''
+        type: string
+
+      # Redaction
+      redact_pii:
+        description: 'Redact PII in prompt'
+        required: false
+        default: false
+        type: boolean
+      redaction_patterns:
+        description: 'Comma-separated regex patterns to redact'
+        required: false
+        default: ''
+        type: string
+      redaction_replacement:
+        description: 'Replacement string for redaction'
+        required: false
+        default: '[REDACTED]'
+        type: string
+
+      # Context enrichment
+      include_issue_comments:
+        description: 'Include PR issue comments in prompt'
+        required: false
+        default: false
+        type: boolean
+      include_review_comments:
+        description: 'Include PR review comments in prompt'
+        required: false
+        default: false
+        type: boolean
+      max_comment_chars:
+        description: 'Max chars per included comment'
+        required: false
+        default: 4000
+        type: number
+      max_comments:
+        description: 'Max comments to include'
+        required: false
+        default: 20
+        type: number
+      include_related_prs:
+        description: 'Include related PRs in prompt'
+        required: false
+        default: false
+        type: boolean
+      related_prs_query:
+        description: 'GitHub search query for related PRs (optional)'
+        required: false
+        default: ''
+        type: string
+      max_related_prs:
+        description: 'Max related PRs to include'
+        required: false
+        default: 5
+        type: number
+
+      # Templates
+      prompt_template_path:
+        description: 'Path to custom prompt template'
+        required: false
+        default: ''
+        type: string
+      summary_template_path:
+        description: 'Path to custom summary template'
+        required: false
+        default: ''
+        type: string
+
+      # Config file
+      review_config_path:
+        description: 'Path to reviewer.json (overrides default .intelligencex/reviewer.json)'
+        required: false
+        default: ''
+        type: string
+
+      # Provider-specific
+      codex_path:
+        description: 'Codex app-server executable path'
+        required: false
+        default: ''
+        type: string
+      codex_args:
+        description: 'Codex app-server arguments'
+        required: false
+        default: ''
+        type: string
+      codex_cwd:
+        description: 'Codex app-server working directory'
+        required: false
+        default: ''
+        type: string
+
+      copilot_cli_path:
+        description: 'Copilot CLI path'
+        required: false
+        default: ''
+        type: string
+      copilot_cli_url:
+        description: 'Copilot CLI URL (host:port)'
+        required: false
+        default: ''
+        type: string
+      copilot_cli_workdir:
+        description: 'Copilot CLI working directory'
+        required: false
+        default: ''
+        type: string
+      copilot_auto_install:
+        description: 'Allow auto-install of Copilot CLI'
+        required: false
+        default: false
+        type: boolean
+      copilot_auto_install_method:
+        description: 'Auto-install method (Auto/Winget/Brew/Npm/Script)'
+        required: false
+        default: 'Auto'
+        type: string
+      copilot_auto_install_prerelease:
+        description: 'Auto-install prerelease Copilot CLI'
+        required: false
+        default: false
+        type: boolean
+
+    secrets:
+      GITHUB_TOKEN:
+        required: true
+      INTELLIGENCEX_AUTH_B64:
+        required: false
+
+jobs:
+  review:
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build IntelligenceX.Reviewer
+        shell: bash
+        run: dotnet build IntelligenceX.Reviewer/IntelligenceX.Reviewer.csproj -c Release
+
+      - name: Run IntelligenceX.Reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INTELLIGENCEX_AUTH_B64: ${{ secrets.INTELLIGENCEX_AUTH_B64 }}
+
+          INPUT_PROVIDER: ${{ inputs.provider }}
+          INPUT_MODEL: ${{ inputs.model }}
+          INPUT_OPENAI_MODEL: ${{ inputs.openai_model }}
+          INPUT_COPILOT_MODEL: ${{ inputs.copilot_model }}
+          INPUT_OPENAI_TRANSPORT: ${{ inputs.openai_transport }}
+          INPUT_REPO: ${{ inputs.repo }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+
+          INPUT_PROFILE: ${{ inputs.profile }}
+          INPUT_STRICTNESS: ${{ inputs.strictness }}
+          INPUT_TONE: ${{ inputs.tone }}
+          INPUT_FOCUS: ${{ inputs.focus }}
+
+          INPUT_LENGTH: ${{ inputs.length }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_PERSONA: ${{ inputs.persona }}
+          INPUT_NOTES: ${{ inputs.notes }}
+
+          INPUT_COMMENT_MODE: ${{ inputs.comment_mode }}
+          INPUT_PROGRESS_UPDATES: ${{ inputs.progress_updates }}
+          INPUT_PROGRESS_UPDATE_SECONDS: ${{ inputs.progress_update_seconds }}
+          INPUT_PROGRESS_PREVIEW_CHARS: ${{ inputs.progress_preview_chars }}
+
+          INPUT_MAX_FILES: ${{ inputs.max_files }}
+          INPUT_MAX_PATCH_CHARS: ${{ inputs.max_patch_chars }}
+          INPUT_MAX_INLINE_COMMENTS: ${{ inputs.max_inline_comments }}
+          INPUT_SEVERITY_THRESHOLD: ${{ inputs.severity_threshold }}
+
+          INPUT_WAIT_SECONDS: ${{ inputs.wait_seconds }}
+          INPUT_IDLE_SECONDS: ${{ inputs.idle_seconds }}
+
+          INPUT_SKIP_DRAFT: ${{ inputs.skip_draft }}
+          INPUT_SKIP_TITLES: ${{ inputs.skip_titles }}
+          INPUT_SKIP_LABELS: ${{ inputs.skip_labels }}
+          INPUT_SKIP_PATHS: ${{ inputs.skip_paths }}
+
+          INPUT_REDACT_PII: ${{ inputs.redact_pii }}
+          INPUT_REDACTION_PATTERNS: ${{ inputs.redaction_patterns }}
+          INPUT_REDACTION_REPLACEMENT: ${{ inputs.redaction_replacement }}
+
+          INPUT_INCLUDE_ISSUE_COMMENTS: ${{ inputs.include_issue_comments }}
+          INPUT_INCLUDE_REVIEW_COMMENTS: ${{ inputs.include_review_comments }}
+          INPUT_MAX_COMMENT_CHARS: ${{ inputs.max_comment_chars }}
+          INPUT_MAX_COMMENTS: ${{ inputs.max_comments }}
+          INPUT_INCLUDE_RELATED_PRS: ${{ inputs.include_related_prs }}
+          INPUT_RELATED_PRS_QUERY: ${{ inputs.related_prs_query }}
+          INPUT_MAX_RELATED_PRS: ${{ inputs.max_related_prs }}
+
+          INPUT_PROMPT_TEMPLATE_PATH: ${{ inputs.prompt_template_path }}
+          INPUT_SUMMARY_TEMPLATE_PATH: ${{ inputs.summary_template_path }}
+
+          REVIEW_CONFIG_PATH: ${{ inputs.review_config_path }}
+
+          CODEX_APP_SERVER_PATH: ${{ inputs.codex_path }}
+          CODEX_APP_SERVER_ARGS: ${{ inputs.codex_args }}
+          CODEX_APP_SERVER_CWD: ${{ inputs.codex_cwd }}
+
+          COPILOT_CLI_PATH: ${{ inputs.copilot_cli_path }}
+          COPILOT_CLI_URL: ${{ inputs.copilot_cli_url }}
+          COPILOT_CLI_WORKDIR: ${{ inputs.copilot_cli_workdir }}
+          COPILOT_AUTO_INSTALL: ${{ inputs.copilot_auto_install }}
+          COPILOT_AUTO_INSTALL_METHOD: ${{ inputs.copilot_auto_install_method }}
+          COPILOT_AUTO_INSTALL_PRERELEASE: ${{ inputs.copilot_auto_install_prerelease }}
+        shell: bash
+        run: |
+          dotnet run --project IntelligenceX.Reviewer/IntelligenceX.Reviewer.csproj -c Release

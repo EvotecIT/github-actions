@@ -17,12 +17,14 @@ What’s included
   - `.github/workflows/release-dotnet.yml` - pack and push NuGet packages.
   - `.github/workflows/release-powershell.yml` - publish module to PowerShell Gallery.
   - `.github/workflows/review-claude.yml` - PR code review with Claude.
+  - `.github/workflows/review-intelligencex.yml` - PR code review with IntelligenceX (OpenAI/Copilot).
   - `.github/workflows/maintenance-cleanup.yml` - artifacts/cache cleanup core.
 
 - Composite actions (reused internally and usable directly if needed):
   - `.github/actions/dotnet-test-summary` - print only failing .NET tests (TRX parser).
   - `.github/actions/pester-summary` - print only failing Pester tests.
   - `.github/actions/ps-refresh-psd1` - install PSPublishModule and refresh PSD1; optional commit.
+  - `.github/actions/powerforge-run` - install `PowerForge.Cli` (dotnet tool) and run `powerforge` commands (supports JSON output).
   - `.github/actions/enforce-encoding` - check/fix encoding (e.g., `utf8NoBOM`).
   - `.github/actions/dotnet-run-tests` - restore/build (optional), run `dotnet test` for provided TFMs with TRX and coverage, emit per-framework counts JSON.
   - `.github/actions/pester-runner` - detect/execute Pester tests (PS 5.1/7), produce NUnit XML and counts JSON, configurable empty-tests policy.
@@ -42,6 +44,7 @@ Quick start (copy one file)
 - PowerShell Module CI: see `templates/ci-powershell.yml`.
 - Releases: `templates/release-dotnet.yml`, `templates/release-powershell.yml`.
 - Claude review: `templates/review-claude.yml`.
+- IntelligenceX review: `templates/review-intelligencex.yml`.
 - Cleanup (scheduled): `templates/cleanup.yml`.
 
 Templates (examples)
@@ -91,6 +94,15 @@ Key inputs (high level)
 - PowerShell Release (`.github/workflows/release-powershell.yml`):
   - Runs your build script and calls `Publish-Module` from `publish_from_path`.
 
+- IntelligenceX Review (`.github/workflows/review-intelligencex.yml`):
+  - `provider` (`openai` | `copilot`) and `model` to select the backend.
+  - `openai_transport` (`native` | `appserver`) plus optional `openai_model` / `copilot_model`.
+  - `profile`, `strictness`, `tone`, `focus` to tune the prompt.
+  - `comment_mode`, `progress_updates`, `progress_update_seconds` for sticky progress comments.
+  - Optional context enrichment: `include_issue_comments`, `include_review_comments`, `include_related_prs`,
+    `related_prs_query`, `max_comments`, `max_comment_chars`, `max_related_prs`.
+  - Copilot options: `copilot_auto_install*`, `copilot_cli_path`, `copilot_cli_url`, `copilot_cli_workdir`.
+
 Runner flexibility
 ------------------
 - All reusable workflows accept `runs_on` as JSON, so you can use GitHub-hosted (e.g. `["windows-latest"]`) or self-hosted (e.g. `["self-hosted","windows"]`).
@@ -120,6 +132,7 @@ Secrets
 - NuGet: `NUGET_API_KEY` for `.NET` release.
 - PowerShell Gallery: `PSGALLERY_API_KEY` for module release.
 - Claude review: `CLAUDE_CODE_OAUTH_TOKEN`.
+- IntelligenceX native auth: `INTELLIGENCEX_AUTH_B64` (base64 auth bundle from `IntelligenceX.AuthTool export`).
 
 Migration from per-repo YAML
 ----------------------------

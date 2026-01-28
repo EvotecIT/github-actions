@@ -1,0 +1,47 @@
+name: PR Review (IntelligenceX)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    uses: evotecit/github-actions/.github/workflows/review-intelligencex.yml@main
+    with:
+      runs_on: '["ubuntu-latest"]'
+      provider: openai # openai | copilot
+      model: gpt-5.2-codex # provider-specific default
+      openai_transport: native # native | appserver
+      profile: balanced
+      length: long
+      mode: hybrid
+      comment_mode: sticky
+      progress_updates: true
+      progress_update_seconds: 30
+      # OpenAI example:
+      # provider: openai
+      # model: gpt-5.2-codex
+      # openai_model: gpt-5.2-codex
+      # openai_transport: native
+      # codex_path: /opt/codex/app-server
+      # codex_args: ''
+      # codex_cwd: ''
+      #
+      # Copilot example:
+      # provider: copilot
+      # model: gpt-4.1
+      # copilot_model: gpt-4.1
+      # copilot_cli_path: /usr/bin/copilot
+      # copilot_cli_url: http://127.0.0.1:53100
+      # copilot_cli_workdir: /tmp
+      # copilot_auto_install: false
+      # copilot_auto_install_method: Auto
+      #
+      # Context enrichment:
+      # include_issue_comments: true
+      # include_review_comments: true
+      # include_related_prs: true
+      # related_prs_query: 'repo:owner/repo is:pr is:open label:"bug"'
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      INTELLIGENCEX_AUTH_B64: ${{ secrets.INTELLIGENCEX_AUTH_B64 }}

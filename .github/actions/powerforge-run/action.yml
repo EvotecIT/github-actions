@@ -1,0 +1,98 @@
+name: "PowerForge Run"
+description: "Installs PowerForge CLI (dotnet tool) and runs a PowerForge command."
+inputs:
+  sdk:
+    description: ".NET SDK version (e.g. 8.0.x, 10.0.x)"
+    required: false
+    default: "8.0.x"
+  tool_version:
+    description: "Optional PowerForge.Cli tool version. Empty = latest."
+    required: false
+    default: ""
+  tool_source:
+    description: "Optional additional NuGet source for the tool (e.g. private feed URL)."
+    required: false
+    default: ""
+  command:
+    description: "PowerForge command to run (e.g. build, pipeline, publish)."
+    required: true
+  arguments:
+    description: "Newline-separated arguments (one per line)."
+    required: false
+    default: ""
+  working_directory:
+    description: "Working directory to run in."
+    required: false
+    default: "."
+  output_json:
+    description: "When true, appends '--output json'."
+    required: false
+    default: "false"
+  diagnostics:
+    description: "When true, appends '--diagnostics'."
+    required: false
+    default: "false"
+  verbose:
+    description: "When true, appends '--verbose'."
+    required: false
+    default: "false"
+  no_color:
+    description: "When true, appends '--no-color'."
+    required: false
+    default: "true"
+runs:
+  using: "composite"
+  steps:
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.sdk }}
+
+    - name: Install PowerForge CLI
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $toolPath = Join-Path $env:GITHUB_WORKSPACE '.tools'
+        New-Item -ItemType Directory -Force -Path $toolPath | Out-Null
+
+        $pkg = 'PowerForge.Cli'
+        $version = '${{ inputs.tool_version }}'.Trim()
+        $source = '${{ inputs.tool_source }}'.Trim()
+
+        $installArgs = @('tool','install','--tool-path', $toolPath, $pkg)
+        if ($version) { $installArgs += @('--version', $version) }
+        if ($source) { $installArgs += @('--add-source', $source) }
+
+        dotnet @installArgs
+
+        $toolPath | Out-File -FilePath $env:GITHUB_PATH -Append
+
+    - name: Run PowerForge
+      shell: pwsh
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        $cmd = '${{ inputs.command }}'
+        if ([string]::IsNullOrWhiteSpace($cmd)) { throw "Input 'command' is required." }
+
+        $args = @()
+        '${{ inputs.arguments }}'.Split("`n") | ForEach-Object {
+          $a = $_.Trim()
+          if ($a) { $args += $a }
+        }
+
+        $outputJson = [bool]::Parse('${{ inputs.output_json }}')
+        if ($outputJson) { $args += @('--output', 'json') }
+
+        $diagnostics = [bool]::Parse('${{ inputs.diagnostics }}')
+        if ($diagnostics) { $args += '--diagnostics' }
+
+        $verbose = [bool]::Parse('${{ inputs.verbose }}')
+        if ($verbose) { $args += '--verbose' }
+
+        $noColor = [bool]::Parse('${{ inputs.no_color }}')
+        if ($noColor) { $args += '--no-color' }
+
+        & powerforge $cmd @args
+
