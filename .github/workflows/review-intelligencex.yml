@@ -383,6 +383,9 @@ on:
 jobs:
   review:
     runs-on: ${{ fromJSON(inputs.runs_on) }}
+    env:
+      INTELLIGENCEX_APP_ID: ${{ secrets.INTELLIGENCEX_GITHUB_APP_ID }}
+      INTELLIGENCEX_APP_KEY: ${{ secrets.INTELLIGENCEX_GITHUB_APP_PRIVATE_KEY }}
     permissions:
       contents: read
       pull-requests: write
@@ -400,11 +403,11 @@ jobs:
 
       - name: Create GitHub App token
         id: app_token
-        if: ${{ secrets.INTELLIGENCEX_GITHUB_APP_ID != '' && secrets.INTELLIGENCEX_GITHUB_APP_PRIVATE_KEY != '' }}
+        if: ${{ env.INTELLIGENCEX_APP_ID != '' && env.INTELLIGENCEX_APP_KEY != '' }}
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.INTELLIGENCEX_GITHUB_APP_ID }}
-          private-key: ${{ secrets.INTELLIGENCEX_GITHUB_APP_PRIVATE_KEY }}
+          app-id: ${{ env.INTELLIGENCEX_APP_ID }}
+          private-key: ${{ env.INTELLIGENCEX_APP_KEY }}
 
       - name: Resolve reviewer release
         if: ${{ inputs.reviewer_source == 'release' && inputs.reviewer_release_url == '' }}
