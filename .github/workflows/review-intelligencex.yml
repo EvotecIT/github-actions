@@ -549,7 +549,7 @@ jobs:
           COPILOT_AUTO_INSTALL_PRERELEASE: ${{ inputs.copilot_auto_install_prerelease }}
         shell: bash
         run: |
-          dotnet run --project IntelligenceX.Reviewer/IntelligenceX.Reviewer.csproj -c Release
+          dotnet run --project IntelligenceX.Reviewer/IntelligenceX.Reviewer.csproj -c Release -f net8.0
 
       - name: Run IntelligenceX.Reviewer (release, unix)
         if: ${{ inputs.reviewer_source == 'release' && runner.os != 'Windows' }}
