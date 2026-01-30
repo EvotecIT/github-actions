@@ -147,6 +147,21 @@ on:
         required: false
         default: 4000
         type: number
+      diagnostics:
+        description: 'Enable reviewer diagnostics'
+        required: false
+        default: false
+        type: boolean
+      preflight:
+        description: 'Run health check before review'
+        required: false
+        default: false
+        type: boolean
+      preflight_timeout_seconds:
+        description: 'Preflight timeout in seconds'
+        required: false
+        default: 15
+        type: number
 
       # Limits
       max_files:
@@ -496,6 +511,9 @@ jobs:
           INPUT_PROGRESS_UPDATES: ${{ inputs.progress_updates }}
           INPUT_PROGRESS_UPDATE_SECONDS: ${{ inputs.progress_update_seconds }}
           INPUT_PROGRESS_PREVIEW_CHARS: ${{ inputs.progress_preview_chars }}
+          INPUT_DIAGNOSTICS: ${{ inputs.diagnostics }}
+          INPUT_PREFLIGHT: ${{ inputs.preflight }}
+          INPUT_PREFLIGHT_TIMEOUT_SECONDS: ${{ inputs.preflight_timeout_seconds }}
 
           INPUT_MAX_FILES: ${{ inputs.max_files }}
           INPUT_MAX_PATCH_CHARS: ${{ inputs.max_patch_chars }}
@@ -582,6 +600,9 @@ jobs:
           INPUT_PROGRESS_UPDATES: ${{ inputs.progress_updates }}
           INPUT_PROGRESS_UPDATE_SECONDS: ${{ inputs.progress_update_seconds }}
           INPUT_PROGRESS_PREVIEW_CHARS: ${{ inputs.progress_preview_chars }}
+          INPUT_DIAGNOSTICS: ${{ inputs.diagnostics }}
+          INPUT_PREFLIGHT: ${{ inputs.preflight }}
+          INPUT_PREFLIGHT_TIMEOUT_SECONDS: ${{ inputs.preflight_timeout_seconds }}
 
           INPUT_MAX_FILES: ${{ inputs.max_files }}
           INPUT_MAX_PATCH_CHARS: ${{ inputs.max_patch_chars }}
@@ -674,6 +695,9 @@ jobs:
           INPUT_PROGRESS_UPDATES: ${{ inputs.progress_updates }}
           INPUT_PROGRESS_UPDATE_SECONDS: ${{ inputs.progress_update_seconds }}
           INPUT_PROGRESS_PREVIEW_CHARS: ${{ inputs.progress_preview_chars }}
+          INPUT_DIAGNOSTICS: ${{ inputs.diagnostics }}
+          INPUT_PREFLIGHT: ${{ inputs.preflight }}
+          INPUT_PREFLIGHT_TIMEOUT_SECONDS: ${{ inputs.preflight_timeout_seconds }}
 
           INPUT_MAX_FILES: ${{ inputs.max_files }}
           INPUT_MAX_PATCH_CHARS: ${{ inputs.max_patch_chars }}
@@ -733,3 +757,4 @@ jobs:
             exit 1
           }
           dotnet $reviewer.FullName
+
