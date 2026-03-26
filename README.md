@@ -18,7 +18,7 @@ What’s included
   - `.github/workflows/release-powershell.yml` - publish module to PowerShell Gallery.
   - `.github/workflows/review-claude.yml` - PR code review with Claude.
   - `.github/workflows/review-intelligencex.yml` - PR code review with IntelligenceX (OpenAI/Copilot).
-  - `.github/workflows/maintenance-cleanup.yml` - artifacts/cache cleanup core.
+  - `.github/workflows/maintenance-cleanup.yml` - PowerForge-backed artifacts/cache cleanup core with JSON + Markdown reports.
 
 - Composite actions (reused internally and usable directly if needed):
   - `.github/actions/dotnet-test-summary` - print only failing .NET tests (TRX parser).
@@ -46,6 +46,7 @@ Quick start (copy one file)
 - Claude review: `templates/review-claude.yml`.
 - IntelligenceX review: `templates/review-intelligencex.yml`.
 - Cleanup (scheduled): `templates/cleanup.yml`.
+  - Powered by `PSPublishModule` housekeeping rather than inline `github-script` deletion logic.
 
 Templates (examples)
 --------------------

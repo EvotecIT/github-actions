@@ -18,6 +18,11 @@ on:
         required: false
         default: '20'
         type: string
+      apply:
+        description: 'Apply deletions (true/false)'
+        required: false
+        default: 'true'
+        type: string
       runs_on:
         description: 'JSON array of runner labels'
         required: false
@@ -32,112 +37,82 @@ jobs:
   cleanup:
     runs-on: ${{ fromJSON(inputs.runs_on) }}
     steps:
-      - name: Show settings
+      - uses: actions/checkout@v4
+
+      - name: Checkout PSPublishModule
+        uses: actions/checkout@v4
+        with:
+          repository: EvotecIT/PSPublishModule
+          ref: aeafc6ee579a474a14e9f6542ffbd1a2eb81e615
+          path: .powerforge/pspublishmodule
+
+      - name: Generate housekeeping config
+        shell: pwsh
         run: |
-          echo "Days threshold: ${{ inputs.days }}"
-          echo "Keep newest artifacts: ${{ inputs.keep_artifacts }}"
-          echo "Keep newest caches:   ${{ inputs.keep_caches }}"
+          $ErrorActionPreference = 'Stop'
 
-      - name: Purge artifacts by age and count
-        uses: actions/github-script@v7
+          if (-not [int]::TryParse('${{ inputs.days }}', [ref]$days)) {
+            throw "Input 'days' must be an integer. Received: '${{ inputs.days }}'"
+          }
+          if (-not [int]::TryParse('${{ inputs.keep_artifacts }}', [ref]$keepArtifacts)) {
+            throw "Input 'keep_artifacts' must be an integer. Received: '${{ inputs.keep_artifacts }}'"
+          }
+          if (-not [int]::TryParse('${{ inputs.keep_caches }}', [ref]$keepCaches)) {
+            throw "Input 'keep_caches' must be an integer. Received: '${{ inputs.keep_caches }}'"
+          }
+
+          $configPath = Join-Path $env:GITHUB_WORKSPACE '.powerforge/_generated/github-housekeeping.json'
+          $config = [ordered]@{
+            '$schema' = 'https://raw.githubusercontent.com/EvotecIT/PSPublishModule/main/Schemas/github.housekeeping.schema.json'
+            repository = $env:GITHUB_REPOSITORY
+            tokenEnvName = 'GITHUB_TOKEN'
+            artifacts = [ordered]@{
+              enabled = $true
+              keepLatestPerName = $keepArtifacts
+              maxAgeDays = $days
+              maxDelete = 1000
+            }
+            caches = [ordered]@{
+              enabled = $true
+              keepLatestPerKey = $keepCaches
+              maxAgeDays = $days
+              maxDelete = 1000
+            }
+            runner = [ordered]@{
+              enabled = $false
+            }
+          }
+
+          $directory = Split-Path -Parent $configPath
+          if (-not [string]::IsNullOrWhiteSpace($directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+          }
+
+          $config | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $configPath -Encoding utf8
+
+      - name: Show settings
+        shell: pwsh
+        run: |
+          Write-Host "Days threshold: ${{ inputs.days }}"
+          Write-Host "Keep newest artifacts: ${{ inputs.keep_artifacts }}"
+          Write-Host "Keep newest caches: ${{ inputs.keep_caches }}"
+          Write-Host "Apply deletions: ${{ inputs.apply }}"
+
+      - name: Run PowerForge housekeeping
+        id: housekeeping
+        uses: ./.powerforge/pspublishmodule/.github/actions/github-housekeeping
         with:
-          script: |
-            async function safeDeleteArtifact(owner, repo, id, name) {
-              for (let attempt = 1; attempt <= 5; attempt++) {
-                try {
-                  await github.rest.actions.deleteArtifact({ owner, repo, artifact_id: id });
-                  core.info(`Deleted artifact ${name} (${id})`);
-                  return true;
-                } catch (e) {
-                  if ([500,502,503,504].includes(e.status)) {
-                    core.warning(`Retry ${attempt} deleting artifact ${id} (status ${e.status})`);
-                    await new Promise(r => setTimeout(r, 2000 * attempt));
-                    continue;
-                  }
-                  core.error(`Artifact ${id} failed with ${e.status}: ${e.message}`);
-                  return false;
-                }
-              }
-              core.error(`Giving up artifact ${id} after retries`);
-              return false;
-            }
+          config-path: ./.powerforge/_generated/github-housekeeping.json
+          apply: ${{ inputs.apply }}
+          report-path: ./.powerforge/_reports/github-housekeeping.json
+          summary-path: ./.powerforge/_reports/github-housekeeping.md
 
-            const owner = context.repo.owner;
-            const repo  = context.repo.repo;
-            const days = Number('${{ inputs.days }}');
-            const keep = Number('${{ inputs.keep_artifacts }}');
-            const cutoff = Date.now() - days*24*60*60*1000;
-
-            const artifacts = [];
-            for (let page = 1; ; page++) {
-              const { data } = await github.rest.actions.listArtifactsForRepo({ owner, repo, per_page: 100, page });
-              if (!data.artifacts?.length) break;
-              artifacts.push(...data.artifacts);
-            }
-
-            artifacts.sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-
-            let deleted = 0;
-            for (let i = 0; i < artifacts.length; i++) {
-              const a = artifacts[i];
-              const created = new Date(a.created_at).getTime();
-              if (i >= keep || created < cutoff) {
-                const ok = await safeDeleteArtifact(owner, repo, a.id, a.name);
-                if (ok) deleted++;
-              }
-            }
-            core.info(`Artifacts total: ${artifacts.length}, deleted: ${deleted}, kept: ${Math.max(artifacts.length - deleted, 0)}`);
-
-      - name: Purge caches by age and count
-        uses: actions/github-script@v7
+      - name: Upload housekeeping reports
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            async function safeDeleteCache(owner, repo, id, key) {
-              for (let attempt = 1; attempt <= 5; attempt++) {
-                try {
-                  await github.request('DELETE /repos/{owner}/{repo}/actions/caches/{cache_id}', {
-                    owner, repo, cache_id: id
-                  });
-                  core.info(`Deleted cache ${key} (${id})`);
-                  return true;
-                } catch (e) {
-                  if ([500,502,503,504].includes(e.status)) {
-                    core.warning(`Retry ${attempt} deleting cache ${id} (status ${e.status})`);
-                    await new Promise(r => setTimeout(r, 2000 * attempt));
-                    continue;
-                  }
-                  core.error(`Cache ${id} failed with ${e.status}: ${e.message}`);
-                  return false;
-                }
-              }
-              core.error(`Giving up cache ${id} after retries`);
-              return false;
-            }
-
-            const owner = context.repo.owner;
-            const repo  = context.repo.repo;
-            const days = Number('${{ inputs.days }}');
-            const keep = Number('${{ inputs.keep_caches }}');
-            const cutoff = Date.now() - days*24*60*60*1000;
-
-            const caches = [];
-            for (let page = 1; ; page++) {
-              const { data } = await github.request('GET /repos/{owner}/{repo}/actions/caches',{ owner, repo, per_page: 100, page });
-              const list = data.actions_caches ?? [];
-              if (!list.length) break;
-              caches.push(...list);
-            }
-
-            caches.forEach(c => { c._last = c.last_accessed_at ? new Date(c.last_accessed_at).getTime() : 0; });
-            caches.sort((a,b) => (b._last - a._last));
-
-            let deleted = 0;
-            for (let i = 0; i < caches.length; i++) {
-              const c = caches[i];
-              if (i >= keep || !Number.isFinite(c._last) || c._last < cutoff) {
-                const ok = await safeDeleteCache(owner, repo, c.id, c.key);
-                if (ok) deleted++;
-              }
-            }
-            core.info(`Caches total: ${caches.length}, deleted: ${deleted}, kept: ${Math.max(caches.length - deleted, 0)}`);
-
+          name: evotec-actions-storage-cleanup-reports
+          path: |
+            ${{ steps.housekeeping.outputs.report-path }}
+            ${{ steps.housekeeping.outputs.summary-path }}
+          if-no-files-found: ignore
