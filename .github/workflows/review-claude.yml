@@ -46,12 +46,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code Review
-        id: claude-review
-        uses: anthropics/claude-code-action@beta
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          direct_prompt: ${{ inputs.direct_prompt }}
-          model: ${{ inputs.model }}
-          use_sticky_comment: true
+      - name: Claude Code Review disabled
+        shell: bash
+        run: |
+          echo "Claude Code Review is disabled because the Anthropic/Claude subscription is inactive."

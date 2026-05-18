@@ -212,7 +212,7 @@ jobs:
     secrets: inherit
 
   claude-review:
-    if: ${{ inputs.claude_review && github.event_name == 'pull_request' }}
+    if: ${{ false && inputs.claude_review && github.event_name == 'pull_request' }}
     uses: EvotecIT/github-actions/.github/workflows/review-claude.yml@master
     with:
       runs_on: ${{ inputs.claude_runs_on }}

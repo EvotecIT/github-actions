@@ -174,7 +174,7 @@ concurrency:
 jobs:
   # Optional PR code review job powered by Claude
   claude:
-    if: ${{ inputs.claude_review && github.event_name == 'pull_request' }}
+    if: ${{ false && inputs.claude_review && github.event_name == 'pull_request' }}
     runs-on: ${{ fromJSON(inputs.runs_on) }}
     permissions:
       contents: read
